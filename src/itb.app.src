@@ -1,0 +1,10 @@
+{application, itb, [
+    {description,
+     "ITB Erlang binding - thin Triple Pipeline proxy over the ITB C "
+     "binding via NIF"},
+    {vsn, "0.3.0"},
+    {registered, []},
+    {applications, [kernel, stdlib]},
+    {env, []},
+    {modules, []}
+]}.
