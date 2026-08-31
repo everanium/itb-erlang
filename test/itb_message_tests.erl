@@ -13,8 +13,7 @@ nomac_profile_test_() ->
 
 round_trips(Profile) ->
     {Sender, Receiver} = itb_test_util:pair(Profile, #{}),
-    Payloads = [<<>>,
-                <<0>>,
+    Payloads = [<<0>>,
                 <<"any text or binary data">>,
                 binary:copy(<<16#00>>, 4096),
                 binary:copy(<<16#FF>>, 4096),
@@ -22,7 +21,7 @@ round_trips(Profile) ->
     lists:foreach(
       fun(Plain) ->
               {ok, Wire} = itb:encrypt_message(Sender, Plain),
-              ?assert(Plain =:= <<>> orelse Wire =/= Plain),
+              ?assert(Wire =/= Plain),
               {ok, Back} = itb:decrypt_message(Receiver, Wire),
               ?assertEqual(Plain, Back)
       end, Payloads),
@@ -54,4 +53,21 @@ opts_pass_through_test_() ->
         ?assertEqual(Plain, Back),
         ok = itb:free(Receiver),
         ok = itb:free(Sender)
+    end}.
+
+%% Go core rejects zero-length plaintext uniformly with ErrEmptyInput
+%% -> {bad_input, _} before any wire is produced. An empty message has
+%% no cover story: it is always distinguishable at some layer (wire
+%% length, timing, traffic count). Callers for whom an empty signal is
+%% meaningful send a marker byte instead.
+empty_payload_test_() ->
+    {timeout, 60, fun() ->
+        lists:foreach(
+          fun(Profile) ->
+                  {ok, Sender} = itb:init(Profile, #{}),
+                  ?assertMatch({error, {bad_input, _}},
+                               itb:encrypt_message(Sender, <<>>)),
+                  ok = itb:free(Sender)
+          end,
+          [<<"singlemsg-triple-mac-v1">>, <<"singlemsg-triple-nomac-v1">>])
     end}.

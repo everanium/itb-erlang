@@ -36,14 +36,24 @@ sequential_sessions_test_() ->
         ok = itb:free(Sender)
     end}.
 
-%% Zero-length payload through a full session.
+%% Go core rejects zero-payload streams uniformly with ErrEmptyInput
+%% -> {bad_input, _}. The error surfaces on end or on the subsequent
+%% drain when no bytes were written; a stream carrying no plaintext
+%% produces no wire on this surface.
 empty_pump_test_() ->
     {timeout, 120, fun() ->
-        {Sender, Receiver} =
-            itb_test_util:pair(<<"streaming-aead-triple-mac-v1">>, #{}),
-        Wire = itb_test_util:pump(Sender, encrypt, <<>>),
-        ?assert(byte_size(Wire) > 0),
-        ?assertEqual(<<>>, itb_test_util:pump(Receiver, decrypt, Wire)),
-        ok = itb:free(Receiver),
+        {ok, Sender} = itb:init(<<"streaming-aead-triple-mac-v1">>, #{}),
+        {ok, Stream} = itb:encrypt_stream(Sender),
+        EndResult = itb:stream_end(Stream),
+        ReadResult = itb:stream_read(Stream, 1024),
+        ?assert(case EndResult of
+                    {error, {bad_input, _}} -> true;
+                    _ -> false
+                end
+                orelse case ReadResult of
+                           {error, {bad_input, _}} -> true;
+                           _ -> false
+                       end),
+        ok = itb:stream_free(Stream),
         ok = itb:free(Sender)
     end}.

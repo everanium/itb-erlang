@@ -18,19 +18,32 @@ noaead_one_shot_test_() ->
 
 round_trip(Profile) ->
     {Sender, Receiver} = itb_test_util:pair(Profile, #{}),
-    Payloads = [<<>>,
-                <<0>>,
+    Payloads = [<<0>>,
                 <<"any text or binary data">>,
                 crypto:strong_rand_bytes((1 bsl 18) + 12345)],
     lists:foreach(
       fun(Plain) ->
               {ok, Wire} = itb:encrypt_stream_one_shot(Sender, Plain),
-              ?assert(Plain =:= <<>> orelse byte_size(Wire) > byte_size(Plain)),
+              ?assert(byte_size(Wire) > byte_size(Plain)),
               {ok, Back} = itb:decrypt_stream_one_shot(Receiver, Wire),
               ?assertEqual(Plain, Back)
       end, Payloads),
     ok = itb:free(Receiver),
     ok = itb:free(Sender).
+
+%% Go core rejects zero-length plaintext uniformly with ErrEmptyInput
+%% -> {bad_input, _} before any wire is produced on this surface.
+empty_payload_test_() ->
+    {timeout, 60, fun() ->
+        lists:foreach(
+          fun(Profile) ->
+                  {ok, Sender} = itb:init(Profile, #{}),
+                  ?assertMatch({error, {bad_input, _}},
+                               itb:encrypt_stream_one_shot(Sender, <<>>)),
+                  ok = itb:free(Sender)
+          end,
+          [<<"streaming-aead-triple-mac-v1">>, <<"streaming-noaead-triple-v1">>])
+    end}.
 
 %% A one-shot wire decodes through an incremental session, and a
 %% session-produced wire decodes through the one-shot entry.
