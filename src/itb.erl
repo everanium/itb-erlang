@@ -221,7 +221,7 @@ register_profile(Name, Opts) ->
 %% Runtime + diagnostics
 %% ------------------------------------------------------------------
 
-%% The libitb library version string (e.g. <<"0.3.4">>).
+%% The libitb library version string (e.g. <<"0.3.5">>).
 -spec version() -> {ok, binary()} | {error, reason()}.
 version() ->
     itb_nif:version_nif().

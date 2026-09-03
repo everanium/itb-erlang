@@ -14,7 +14,7 @@
 %% The compiled binding (./build.sh in bindings/erlang) is resolved
 %% relative to this script's location: ../_build/default/lib/itb/ebin.
 
--define(EITB_ERLANG_VERSION, "0.3.4").
+-define(EITB_ERLANG_VERSION, "0.3.5").
 
 main(Args) ->
     ok = add_binding_path(),

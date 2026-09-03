@@ -2,7 +2,7 @@
     {description,
      "ITB Erlang binding - thin Triple Pipeline proxy over the ITB C "
      "binding via NIF"},
-    {vsn, "0.3.4"},
+    {vsn, "0.3.5"},
     {registered, []},
     {applications, [kernel, stdlib]},
     {env, []},
