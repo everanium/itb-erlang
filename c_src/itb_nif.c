@@ -6,16 +6,15 @@
  * and relays opaque bytes plus status codes into Erlang terms. No ITB
  * construction logic lives here; profile names, opts keys, and every
  * primitive name are opaque strings validated Go-side. The
- * caller-allocated-buffer retry-once convention (pattern P1) is
- * handled inside libitb_c.a — this shim never calls libitb.so
- * directly.
+ * caller-allocated-buffer retry-once convention is handled inside
+ * libitb_c.a — this shim never calls libitb.so directly.
  *
  * Scheduling. Cipher, stream, and session-lifecycle entries are
  * flagged ERL_NIF_DIRTY_JOB_CPU_BOUND: encrypt / decrypt is CPU-bound
  * and a stream read after end may block until the terminal bytes
  * arrive, either of which would stall a regular Erlang scheduler.
- * The cheap diagnostics entries (version / hashes / last_error) stay
- * on the regular schedulers.
+ * The cheap diagnostics entries (version / last_error) stay on the
+ * regular schedulers.
  *
  * Handle lifetime. Pipelines and stream sessions are NIF resources.
  * The resource destructor is the release backstop when the last term
@@ -75,6 +74,9 @@ static ERL_NIF_TERM status_to_atom(ErlNifEnv *env, itb_status st)
     case ITB_STATUS_SEED_WIDTH_MIX:       name = "seed_width_mix"; break;
     case ITB_STATUS_BAD_MAC:              name = "bad_mac"; break;
     case ITB_STATUS_MAC_FAILURE:          name = "mac_failure"; break;
+    case ITB_STATUS_BLOB_MALFORMED_RECIPE:    name = "blob_malformed_recipe"; break;
+    case ITB_STATUS_RECIPE_PRIMITIVE_UNKNOWN: name = "recipe_primitive_unknown"; break;
+    case ITB_STATUS_UNKNOWN_PROFILE:          name = "unknown_profile"; break;
     case ITB_STATUS_BLOB_MODE_MISMATCH:   name = "blob_mode_mismatch"; break;
     case ITB_STATUS_BLOB_MALFORMED:       name = "blob_malformed"; break;
     case ITB_STATUS_BLOB_VERSION_TOO_NEW: name = "blob_version_too_new"; break;
@@ -268,41 +270,9 @@ static ERL_NIF_TERM init_nif(ErlNifEnv *env, int argc,
     return make_ok(env, term);
 }
 
-/* open_nif(ProfileBin, BlobBin, OptsPairs, PermBin, WrapBin)
- * -> {ok, Pipeline} | {error, _}
- * Empty Perm + Wrap means "use the blob-embedded masters". */
-static ERL_NIF_TERM open_nif(ErlNifEnv *env, int argc,
-                             const ERL_NIF_TERM argv[])
+/* Wraps a freshly opened C-binding pipeline into a NIF resource term. */
+static ERL_NIF_TERM wrap_pipeline(ErlNifEnv *env, itb_pipeline *pipe)
 {
-    (void)argc;
-    ErlNifBinary blob, perm, wrap;
-    if (!enif_inspect_iolist_as_binary(env, argv[1], &blob) ||
-        !enif_inspect_iolist_as_binary(env, argv[3], &perm) ||
-        !enif_inspect_iolist_as_binary(env, argv[4], &wrap)) {
-        return enif_make_badarg(env);
-    }
-    char *profile = term_to_cstr(env, argv[0]);
-    if (profile == NULL) {
-        return enif_make_badarg(env);
-    }
-    itb_opts *opts = NULL;
-    int rc = opts_from_list(env, argv[2], &opts);
-    if (rc <= 0) {
-        enif_free(profile);
-        return rc == 0 ? enif_make_badarg(env)
-                       : make_error_msg(env, ITB_STATUS_INTERNAL,
-                                        "opts allocation failed");
-    }
-    itb_pipeline *pipe = NULL;
-    itb_status st = itb_pipeline_open(
-        profile, blob.data, blob.size, opts,
-        perm.size > 0 ? perm.data : NULL, perm.size,
-        wrap.size > 0 ? wrap.data : NULL, wrap.size, &pipe);
-    enif_free(profile);
-    itb_opts_free(opts);
-    if (st != ITB_STATUS_OK) {
-        return make_error(env, st);
-    }
     pipeline_res *r = enif_alloc_resource(g_pipeline_rt, sizeof(*r));
     if (r == NULL) {
         itb_pipeline_free(pipe);
@@ -315,8 +285,59 @@ static ERL_NIF_TERM open_nif(ErlNifEnv *env, int argc,
     return make_ok(env, term);
 }
 
-/* blob_nif(Pipeline) -> {ok, Blob} | {error, _} */
-static ERL_NIF_TERM blob_nif(ErlNifEnv *env, int argc,
+/* load_nif(BlobBin, PermBin, WrapBin) -> {ok, Pipeline} | {error, _}
+ * Empty Perm + Wrap means "use the blob-embedded masters"; the blob's
+ * embedded profile record is the sole structural source. */
+static ERL_NIF_TERM load_nif(ErlNifEnv *env, int argc,
+                             const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    ErlNifBinary blob, perm, wrap;
+    if (!enif_inspect_iolist_as_binary(env, argv[0], &blob) ||
+        !enif_inspect_iolist_as_binary(env, argv[1], &perm) ||
+        !enif_inspect_iolist_as_binary(env, argv[2], &wrap)) {
+        return enif_make_badarg(env);
+    }
+    itb_pipeline *pipe = NULL;
+    itb_status st = itb_pipeline_load(
+        blob.data, blob.size,
+        perm.size > 0 ? perm.data : NULL, perm.size,
+        wrap.size > 0 ? wrap.data : NULL, wrap.size, &pipe);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return wrap_pipeline(env, pipe);
+}
+
+/* load_f_nif(PathBin, PermBin, WrapBin) -> {ok, Pipeline} | {error, _}
+ * The file is read inside libitb. */
+static ERL_NIF_TERM load_f_nif(ErlNifEnv *env, int argc,
+                               const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    ErlNifBinary perm, wrap;
+    if (!enif_inspect_iolist_as_binary(env, argv[1], &perm) ||
+        !enif_inspect_iolist_as_binary(env, argv[2], &wrap)) {
+        return enif_make_badarg(env);
+    }
+    char *path = term_to_cstr(env, argv[0]);
+    if (path == NULL) {
+        return enif_make_badarg(env);
+    }
+    itb_pipeline *pipe = NULL;
+    itb_status st = itb_pipeline_load_f(
+        path,
+        perm.size > 0 ? perm.data : NULL, perm.size,
+        wrap.size > 0 ? wrap.data : NULL, wrap.size, &pipe);
+    enif_free(path);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return wrap_pipeline(env, pipe);
+}
+
+/* save_nif(Pipeline) -> {ok, Blob} | {error, _} */
+static ERL_NIF_TERM save_nif(ErlNifEnv *env, int argc,
                              const ERL_NIF_TERM argv[])
 {
     (void)argc;
@@ -328,11 +349,65 @@ static ERL_NIF_TERM blob_nif(ErlNifEnv *env, int argc,
     if (pipe == NULL) {
         return make_error_msg(env, ITB_STATUS_BAD_HANDLE, FREED_PIPELINE_MSG);
     }
-    return make_ok(env, make_bin(env, itb_pipeline_blob(pipe),
-                                 itb_pipeline_blob_len(pipe)));
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    itb_status st = itb_pipeline_save(pipe, &blob, &blob_len);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    ERL_NIF_TERM bin = make_bin(env, blob, blob_len);
+    itb_bytes_free(blob);
+    return make_ok(env, bin);
 }
 
-/* rekey_nif(Pipeline, PermBin, WrapBin) -> ok | {error, _} */
+/* save_f_nif(Pipeline, PathBin) -> ok | {error, _} */
+static ERL_NIF_TERM save_f_nif(ErlNifEnv *env, int argc,
+                               const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    pipeline_res *r = NULL;
+    if (!get_pipeline(env, argv[0], &r)) {
+        return enif_make_badarg(env);
+    }
+    char *path = term_to_cstr(env, argv[1]);
+    if (path == NULL) {
+        return enif_make_badarg(env);
+    }
+    itb_pipeline *pipe = pipeline_ptr(r);
+    if (pipe == NULL) {
+        enif_free(path);
+        return make_error_msg(env, ITB_STATUS_BAD_HANDLE, FREED_PIPELINE_MSG);
+    }
+    itb_status st = itb_pipeline_save_f(pipe, path);
+    enif_free(path);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return enif_make_atom(env, "ok");
+}
+
+/* max_workers_nif(Pipeline, N) -> ok | {error, _} */
+static ERL_NIF_TERM max_workers_nif(ErlNifEnv *env, int argc,
+                                    const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    pipeline_res *r = NULL;
+    int n = 0;
+    if (!get_pipeline(env, argv[0], &r) || !enif_get_int(env, argv[1], &n)) {
+        return enif_make_badarg(env);
+    }
+    itb_pipeline *pipe = pipeline_ptr(r);
+    if (pipe == NULL) {
+        return make_error_msg(env, ITB_STATUS_BAD_HANDLE, FREED_PIPELINE_MSG);
+    }
+    itb_status st = itb_pipeline_max_workers(pipe, n);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return enif_make_atom(env, "ok");
+}
+
+/* rekey_nif(Pipeline, PermBin, WrapBin) -> {ok, Blob} | {error, _} */
 static ERL_NIF_TERM rekey_nif(ErlNifEnv *env, int argc,
                               const ERL_NIF_TERM argv[])
 {
@@ -348,12 +423,16 @@ static ERL_NIF_TERM rekey_nif(ErlNifEnv *env, int argc,
     if (pipe == NULL) {
         return make_error_msg(env, ITB_STATUS_BAD_HANDLE, FREED_PIPELINE_MSG);
     }
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
     itb_status st = itb_pipeline_rekey(pipe, perm.data, perm.size,
-                                       wrap.data, wrap.size);
+                                       wrap.data, wrap.size, &blob, &blob_len);
     if (st != ITB_STATUS_OK) {
         return make_error(env, st);
     }
-    return enif_make_atom(env, "ok");
+    ERL_NIF_TERM bin = make_bin(env, blob, blob_len);
+    itb_bytes_free(blob);
+    return make_ok(env, bin);
 }
 
 /* free_nif(Pipeline) -> ok  (eager release; destructor is backstop) */
@@ -615,30 +694,76 @@ static ERL_NIF_TERM stream_free_nif(ErlNifEnv *env, int argc,
 /* Profile registration + runtime + diagnostics                        */
 /* ------------------------------------------------------------------ */
 
-/* register_profile_nif(NameBin, OptsPairs) -> ok | {error, _} */
-static ERL_NIF_TERM register_profile_nif(ErlNifEnv *env, int argc,
-                                         const ERL_NIF_TERM argv[])
+/* Relays a C-binding JSON out-string as {ok, Bin}, releasing it. */
+static ERL_NIF_TERM json_result(ErlNifEnv *env, itb_status st, char *json)
+{
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    ERL_NIF_TERM bin = make_bin(env, json, strlen(json));
+    itb_string_free(json);
+    return make_ok(env, bin);
+}
+
+/* inspect_nif(BlobBin) -> {ok, ProfileJsonBin} | {error, _} */
+static ERL_NIF_TERM inspect_nif(ErlNifEnv *env, int argc,
+                                const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    ErlNifBinary blob;
+    if (!enif_inspect_iolist_as_binary(env, argv[0], &blob)) {
+        return enif_make_badarg(env);
+    }
+    char *json = NULL;
+    itb_status st = itb_inspect(blob.data, blob.size, &json);
+    return json_result(env, st, json);
+}
+
+/* register_nif(NameBin, ProfileJsonBin) -> ok | {error, _} */
+static ERL_NIF_TERM register_nif(ErlNifEnv *env, int argc,
+                                 const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    char *name = term_to_cstr(env, argv[0]);
+    char *json = term_to_cstr(env, argv[1]);
+    if (name == NULL || json == NULL) {
+        enif_free(name);
+        enif_free(json);
+        return enif_make_badarg(env);
+    }
+    itb_status st = itb_register(name, json);
+    enif_free(name);
+    enif_free(json);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return enif_make_atom(env, "ok");
+}
+
+/* lookup_nif(NameBin) -> {ok, ProfileJsonBin} | {error, _} */
+static ERL_NIF_TERM lookup_nif(ErlNifEnv *env, int argc,
+                               const ERL_NIF_TERM argv[])
 {
     (void)argc;
     char *name = term_to_cstr(env, argv[0]);
     if (name == NULL) {
         return enif_make_badarg(env);
     }
-    itb_opts *opts = NULL;
-    int rc = opts_from_list(env, argv[1], &opts);
-    if (rc <= 0) {
-        enif_free(name);
-        return rc == 0 ? enif_make_badarg(env)
-                       : make_error_msg(env, ITB_STATUS_INTERNAL,
-                                        "opts allocation failed");
-    }
-    itb_status st = itb_register_profile(name, opts);
+    char *json = NULL;
+    itb_status st = itb_lookup(name, &json);
     enif_free(name);
-    itb_opts_free(opts);
-    if (st != ITB_STATUS_OK) {
-        return make_error(env, st);
-    }
-    return enif_make_atom(env, "ok");
+    return json_result(env, st, json);
+}
+
+/* profiles_nif() -> {ok, NamesJsonBin} | {error, _} */
+static ERL_NIF_TERM profiles_nif(ErlNifEnv *env, int argc,
+                                 const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    (void)argv;
+    char *json = NULL;
+    itb_status st = itb_profiles(&json);
+    return json_result(env, st, json);
 }
 
 /* version_nif() -> {ok, VersionBin} | {error, _} */
@@ -653,43 +778,6 @@ static ERL_NIF_TERM version_nif(ErlNifEnv *env, int argc,
                               "libitb version unavailable");
     }
     return make_ok(env, make_bin(env, v, strlen(v)));
-}
-
-/* hash_count_nif() -> integer() */
-static ERL_NIF_TERM hash_count_nif(ErlNifEnv *env, int argc,
-                                   const ERL_NIF_TERM argv[])
-{
-    (void)argc;
-    (void)argv;
-    return enif_make_ulong(env, (unsigned long)itb_hash_count());
-}
-
-/* hash_name_nif(Index) -> NameBin (badarg out of range) */
-static ERL_NIF_TERM hash_name_nif(ErlNifEnv *env, int argc,
-                                  const ERL_NIF_TERM argv[])
-{
-    (void)argc;
-    unsigned long index = 0;
-    if (!enif_get_ulong(env, argv[0], &index)) {
-        return enif_make_badarg(env);
-    }
-    const char *name = itb_hash_name(index);
-    if (name == NULL) {
-        return enif_make_badarg(env);
-    }
-    return make_bin(env, name, strlen(name));
-}
-
-/* hash_width_nif(Index) -> integer() (0 out of range) */
-static ERL_NIF_TERM hash_width_nif(ErlNifEnv *env, int argc,
-                                   const ERL_NIF_TERM argv[])
-{
-    (void)argc;
-    unsigned long index = 0;
-    if (!enif_get_ulong(env, argv[0], &index)) {
-        return enif_make_badarg(env);
-    }
-    return enif_make_int(env, itb_hash_width(index));
 }
 
 /* last_error_nif() -> DetailBin */
@@ -745,8 +833,11 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)
 
 static ErlNifFunc nif_funcs[] = {
     {"init_nif", 2, init_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
-    {"open_nif", 5, open_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
-    {"blob_nif", 1, blob_nif, 0},
+    {"load_nif", 3, load_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"load_f_nif", 3, load_f_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"save_nif", 1, save_nif, 0},
+    {"save_f_nif", 2, save_f_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"max_workers_nif", 2, max_workers_nif, 0},
     {"rekey_nif", 3, rekey_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"free_nif", 1, free_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"encrypt_message_nif", 2, encrypt_message_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
@@ -763,12 +854,11 @@ static ErlNifFunc nif_funcs[] = {
     {"stream_end_nif", 1, stream_end_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"stream_read_nif", 2, stream_read_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"stream_free_nif", 1, stream_free_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
-    {"register_profile_nif", 2, register_profile_nif,
-     ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"inspect_nif", 1, inspect_nif, 0},
+    {"register_nif", 2, register_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"lookup_nif", 1, lookup_nif, 0},
+    {"profiles_nif", 0, profiles_nif, 0},
     {"version_nif", 0, version_nif, 0},
-    {"hash_count_nif", 0, hash_count_nif, 0},
-    {"hash_name_nif", 1, hash_name_nif, 0},
-    {"hash_width_nif", 1, hash_width_nif, 0},
     {"last_error_nif", 0, last_error_nif, 0},
     {"set_memory_limit_nif", 1, set_memory_limit_nif,
      ERL_NIF_DIRTY_JOB_CPU_BOUND},

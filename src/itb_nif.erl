@@ -8,14 +8,16 @@
 
 -module(itb_nif).
 
--export([init_nif/2, open_nif/5, blob_nif/1, rekey_nif/3, free_nif/1,
+-export([init_nif/2, load_nif/3, load_f_nif/3, save_nif/1, save_f_nif/2,
+         max_workers_nif/2, rekey_nif/3, free_nif/1,
          encrypt_message_nif/2, decrypt_message_nif/2,
          encrypt_stream_one_shot_nif/2, decrypt_stream_one_shot_nif/2,
          encrypt_stream_begin_nif/1, decrypt_stream_begin_nif/1,
          stream_write_nif/2, stream_end_nif/1, stream_read_nif/2,
-         stream_free_nif/1, register_profile_nif/2,
-         version_nif/0, hash_count_nif/0, hash_name_nif/1, hash_width_nif/1,
-         last_error_nif/0, set_memory_limit_nif/1, set_gc_percent_nif/1]).
+         stream_free_nif/1,
+         inspect_nif/1, register_nif/2, lookup_nif/1, profiles_nif/0,
+         version_nif/0, last_error_nif/0,
+         set_memory_limit_nif/1, set_gc_percent_nif/1]).
 
 -on_load(load/0).
 
@@ -35,10 +37,19 @@ load() ->
 init_nif(_Profile, _Opts) ->
     erlang:nif_error(itb_nif_not_loaded).
 
-open_nif(_Profile, _Blob, _Opts, _PermMaster, _WrapMaster) ->
+load_nif(_Blob, _PermMaster, _WrapMaster) ->
     erlang:nif_error(itb_nif_not_loaded).
 
-blob_nif(_Pipeline) ->
+load_f_nif(_Path, _PermMaster, _WrapMaster) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+save_nif(_Pipeline) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+save_f_nif(_Pipeline, _Path) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+max_workers_nif(_Pipeline, _N) ->
     erlang:nif_error(itb_nif_not_loaded).
 
 rekey_nif(_Pipeline, _PermMaster, _WrapMaster) ->
@@ -77,19 +88,19 @@ stream_read_nif(_Stream, _MaxBytes) ->
 stream_free_nif(_Stream) ->
     erlang:nif_error(itb_nif_not_loaded).
 
-register_profile_nif(_Name, _Opts) ->
+inspect_nif(_Blob) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+register_nif(_Name, _ProfileJson) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+lookup_nif(_Name) ->
+    erlang:nif_error(itb_nif_not_loaded).
+
+profiles_nif() ->
     erlang:nif_error(itb_nif_not_loaded).
 
 version_nif() ->
-    erlang:nif_error(itb_nif_not_loaded).
-
-hash_count_nif() ->
-    erlang:nif_error(itb_nif_not_loaded).
-
-hash_name_nif(_Index) ->
-    erlang:nif_error(itb_nif_not_loaded).
-
-hash_width_nif(_Index) ->
     erlang:nif_error(itb_nif_not_loaded).
 
 last_error_nif() ->

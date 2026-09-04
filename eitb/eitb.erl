@@ -4,17 +4,22 @@
 %% Subcommands:
 %%
 %%   eitb version                                   library + binding versions
-%%   eitb hashes                                    shipped hash primitive roster
+%%   eitb profiles                                  registered profile catalogue
+%%   eitb inspect <blob-hex>                        profile record of a blob
 %%   eitb encrypt <profile> <in-file> <out-file>    Single Message encrypt
 %%   eitb decrypt <profile> <blob-hex> <in-file> <out-file>
 %%
-%% `encrypt` prints the session blob to stderr as hex; feed that hex
-%% back to `decrypt` on the receiving side.
+%% `encrypt` prints the session blob (itb:save/1) to stderr as hex;
+%% feed that hex back to `decrypt` on the receiving side, which
+%% reopens the session with itb:load/1 (the profile argument only
+%% routes Single Message versus streaming). `profiles` lists the
+%% registered profile catalogue one name per line; the profiles that
+%% carry a cipher surface are the ones `encrypt` / `decrypt` accept.
 %%
 %% The compiled binding (./build.sh in bindings/erlang) is resolved
 %% relative to this script's location: ../_build/default/lib/itb/ebin.
 
--define(EITB_ERLANG_VERSION, "0.3.5").
+-define(EITB_ERLANG_VERSION, "0.4.1").
 
 main(Args) ->
     ok = add_binding_path(),
@@ -23,8 +28,10 @@ main(Args) ->
 
 dispatch(["version"]) ->
     cmd_version();
-dispatch(["hashes"]) ->
-    cmd_hashes();
+dispatch(["profiles"]) ->
+    cmd_profiles();
+dispatch(["inspect", BlobHex]) ->
+    cmd_inspect(BlobHex);
 dispatch(["encrypt", Profile, InFile, OutFile]) ->
     cmd_encrypt(Profile, InFile, OutFile);
 dispatch(["decrypt", Profile, BlobHex, InFile, OutFile]) ->
@@ -35,7 +42,8 @@ dispatch(_) ->
 usage() ->
     io:format(standard_error,
               "usage: eitb version~n"
-              "       eitb hashes~n"
+              "       eitb profiles~n"
+              "       eitb inspect <blob-hex>~n"
               "       eitb encrypt <profile> <in-file> <out-file>~n"
               "       eitb decrypt <profile> <blob-hex> <in-file> <out-file>~n",
               []),
@@ -54,6 +62,25 @@ add_binding_path() ->
                       "eitb: binding not built (~s missing); "
                       "run ./build.sh first~n", [Ebin]),
             halt(1)
+    end.
+
+cmd_profiles() ->
+    lists:foreach(fun(Name) -> io:format("~s~n", [Name]) end, itb:profiles()),
+    0.
+
+cmd_inspect(BlobHex) ->
+    case decode_hex(BlobHex) of
+        error ->
+            io:format(standard_error, "eitb: invalid blob hex~n", []),
+            1;
+        {ok, Blob} ->
+            case itb:inspect(Blob) of
+                {error, Reason} ->
+                    fail("inspect", Reason);
+                {ok, Record} ->
+                    io:format("~s~n", [json:encode(Record)]),
+                    0
+            end
     end.
 
 fail(What, {Status, Detail}) ->
@@ -77,14 +104,6 @@ cmd_version() ->
         {error, Reason} ->
             fail("version", Reason)
     end.
-
-cmd_hashes() ->
-    lists:foldl(
-      fun({Name, Width}, Index) ->
-              io:format("~2b  ~-12s ~b bits~n", [Index, Name, Width]),
-              Index + 1
-      end, 0, itb:hashes()),
-    0.
 
 %% Profiles whose canonical name begins with "streaming-" route
 %% through the streaming session pair instead of the Single Message
@@ -167,7 +186,7 @@ encrypt_with(Pipe, Plain, Profile, InFile, OutFile) ->
                               [OutFile, WriteErr]),
                     1;
                 ok ->
-                    {ok, Blob} = itb:blob(Pipe),
+                    {ok, Blob} = itb:save(Pipe),
                     io:format(standard_error, "~s~n",
                               [string:lowercase(binary:encode_hex(Blob))]),
                     io:format("encrypted ~s -> ~s (~b -> ~b bytes)~n",
@@ -195,9 +214,9 @@ cmd_decrypt(Profile, BlobHex, InFile, OutFile) ->
     end.
 
 decrypt_with(Profile, Blob, Wire, InFile, OutFile) ->
-    case itb:open(Profile, Blob, #{}) of
+    case itb:load(Blob) of
         {error, Reason} ->
-            fail("open", Reason);
+            fail("load", Reason);
         {ok, Pipe} ->
             Result =
                 case is_streaming_profile(Profile) of

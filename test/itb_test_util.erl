@@ -8,8 +8,8 @@
 %% Sender + receiver pipelines over one profile / opts pair.
 pair(Profile, Opts) ->
     {ok, Sender} = itb:init(Profile, Opts),
-    {ok, Blob} = itb:blob(Sender),
-    {ok, Receiver} = itb:open(Profile, Blob, Opts),
+    {ok, Blob} = itb:save(Sender),
+    {ok, Receiver} = itb:load(Blob),
     {Sender, Receiver}.
 
 %% Whole-buffer pump through an incremental session with 1 MiB feed /

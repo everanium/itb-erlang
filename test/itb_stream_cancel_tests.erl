@@ -19,8 +19,8 @@ cancel_mid_flight() ->
     ok = itb:stream_free(Stream),
 
     %% The Pipeline stays usable after the cancelled session.
-    {ok, Blob} = itb:blob(Sender),
-    {ok, Receiver} = itb:open(<<"streaming-aead-triple-mac-v1">>, Blob, #{}),
+    {ok, Blob} = itb:save(Sender),
+    {ok, Receiver} = itb:load(Blob),
     Plain = <<"after cancel">>,
     {ok, Wire} = itb:encrypt_message(Sender, Plain),
     {ok, Back} = itb:decrypt_message(Receiver, Wire),

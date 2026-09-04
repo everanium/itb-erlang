@@ -1,13 +1,14 @@
-%% Error-mapping surface: opaque-string relay, tampered-wire MAC
-%% failure, freed-handle paths, duplicate profile registration (with
-%% an 8-entry `innerHashes` constellation).
+%% Error-mapping surface: opaque-string relay, unknown profile,
+%% tampered-wire MAC failure, freed-handle paths, profile registration
+%% from a JSON record (with an 8-entry `hashes` constellation),
+%% duplicate registration.
 
 -module(itb_errors_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
 unknown_profile_test() ->
-    {error, {bad_input, Detail}} = itb:init(<<"no-such-profile">>, #{}),
+    {error, {unknown_profile, Detail}} = itb:init(<<"no-such-profile">>, #{}),
     ?assert(byte_size(Detail) > 0).
 
 unknown_opts_key_test() ->
@@ -24,9 +25,7 @@ unknown_inner_hash_test() ->
                           #{innerHash => <<"no-such-hash">>})).
 
 malformed_blob_test() ->
-    ?assertMatch({error, _},
-                 itb:open(<<"singlemsg-triple-mac-v1">>,
-                          <<"not a session blob">>, #{})).
+    ?assertMatch({error, _}, itb:load(<<"not a session blob">>)).
 
 %% A bit flip in authenticated wire content fails with mac_failure.
 %% A single flip can land in the container's CSPRNG residue — where
@@ -64,7 +63,7 @@ freed_pipeline_test() ->
     ok = itb:free(Pipe),
     ok = itb:free(Pipe), %% idempotent
     ?assertMatch({error, {bad_handle, _}}, itb:encrypt_message(Pipe, <<"x">>)),
-    ?assertMatch({error, {bad_handle, _}}, itb:blob(Pipe)),
+    ?assertMatch({error, {bad_handle, _}}, itb:save(Pipe)),
     ?assertMatch({error, {bad_handle, _}}, itb:encrypt_stream(Pipe)).
 
 freed_stream_test_() ->
@@ -85,22 +84,30 @@ badarg_test() ->
     ?assertError(badarg, itb:stream_write(make_ref(), <<"x">>)),
     ?assertError(function_clause, itb:init(<<"p">>, not_opts)).
 
-%% RegisterProfile with an 8-entry width-256 innerHashes
-%% constellation, layers off; the registered profile round-trips and a
-%% duplicate registration fails with profile_exists.
-register_profile_test_() ->
+%% Register with an 8-entry width-256 hashes constellation, layers
+%% off; the registered profile round-trips, is visible in the
+%% catalogue, and a duplicate registration fails with profile_exists.
+register_test_() ->
     {timeout, 240, fun() ->
-        Opts = #{mode => <<"singlemsg-nomac">>,
-                 width => 256,
-                 innerHashes => <<"blake3,blake2s,areion256,blake2b256,"
-                                  "chacha20,blake3,blake2s,areion256">>,
-                 keyBits => 1024,
-                 parallaxOn => false,
-                 wrapperOn => false},
-        ok = itb:register_profile(<<"erlang-binding-test-mixed">>, Opts),
+        Hashes = [<<"blake3">>, <<"blake2s">>, <<"areion256">>, <<"blake2b256">>,
+                  <<"chacha20">>, <<"blake3">>, <<"blake2s">>, <<"areion256">>],
+        Profile = #{<<"mode">> => <<"singlemsg-nomac">>,
+                    <<"width">> => 256,
+                    <<"hashes">> => Hashes,
+                    <<"keybits">> => 1024,
+                    <<"parallax">> => false,
+                    <<"wrapper">> => false},
+        ok = itb:register(<<"erlang-binding-test-mixed">>, Profile),
+        ?assert(lists:member(<<"erlang-binding-test-mixed">>, itb:profiles())),
+        {ok, Record} = itb:lookup(<<"erlang-binding-test-mixed">>),
+        ?assertEqual(Hashes, maps:get(<<"hashes">>, Record)),
         ?assertMatch({error, {profile_exists, _}},
-                     itb:register_profile(<<"erlang-binding-test-mixed">>,
-                                          Opts)),
+                     itb:register(<<"erlang-binding-test-mixed">>, Profile)),
+        %% Strict record decode on the Go side: an unknown key is
+        %% rejected there, not by the binding.
+        ?assertMatch({error, {bad_input, _}},
+                     itb:register(<<"erlang-binding-test-badkey">>,
+                                  <<"{\"mode\":\"singlemsg-nomac\",\"bogus\":1}">>)),
         {Sender, Receiver} =
             itb_test_util:pair(<<"erlang-binding-test-mixed">>, #{}),
         Plain = crypto:strong_rand_bytes(8192),

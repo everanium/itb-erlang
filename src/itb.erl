@@ -9,8 +9,8 @@
 %% Quick start:
 %%
 %%     {ok, Sender} = itb:init("singlemsg-triple-mac-v1", #{}),
-%%     {ok, Blob} = itb:blob(Sender),
-%%     {ok, Receiver} = itb:open("singlemsg-triple-mac-v1", Blob, #{}),
+%%     {ok, Blob} = itb:save(Sender),
+%%     {ok, Receiver} = itb:load(Blob),
 %%     {ok, Wire} = itb:encrypt_message(Sender, <<"hi">>),
 %%     {ok, <<"hi">>} = itb:decrypt_message(Receiver, Wire),
 %%     ok = itb:free(Receiver),
@@ -35,17 +35,18 @@
 
 -module(itb).
 
--export([init/2, open/3, open/5, blob/1, rekey/3, free/1,
+-export([init/2, load/1, load/3, load_f/1, load_f/3,
+         save/1, save_f/2, max_workers/2, rekey/3, free/1,
          encrypt_message/2, decrypt_message/2,
          encrypt_stream_one_shot/2, decrypt_stream_one_shot/2,
          encrypt_stream/1, decrypt_stream/1,
          stream_write/2, stream_end/1, stream_read/1, stream_read/2,
          stream_free/1,
-         register_profile/2,
-         version/0, hashes/0, last_error/0,
+         inspect/1, register/2, lookup/1, profiles/0,
+         version/0, last_error/0,
          set_memory_limit/1, set_gc_percent/1]).
 
--export_type([pipeline/0, stream/0, opts/0, reason/0]).
+-export_type([pipeline/0, stream/0, opts/0, profile/0, reason/0]).
 
 -type pipeline() :: reference().
 %% Opaque NIF resource for a Triple Pipeline session.
@@ -60,10 +61,19 @@
 %% binding performs no validation — Go rejects unknown keys and bad
 %% values with a diagnostic in the error detail.
 
+-type profile() :: #{binary() => binary() | integer() | boolean() | [binary()]}.
+%% Profile record: the JSON object libitb emits from inspect/1 /
+%% lookup/1 and accepts in register/2, decoded with the OTP `json`
+%% module (keys <<"name">>, <<"mode">>, <<"width">>, <<"hash">>,
+%% <<"hashes">>, <<"keybits">>, <<"mac">>, <<"tagstub">>, <<"chunk">>,
+%% <<"wrapper">>, <<"outer">>, <<"parallax">>, <<"palette">>,
+%% <<"segment">>; absent keys are optional fields at their zero value).
+
 -type status() ::
     bad_hash | bad_key_bits | bad_handle | bad_input | buffer_too_small |
     encrypt_failed | decrypt_failed | seed_width_mix | bad_mac |
-    mac_failure | blob_mode_mismatch | blob_malformed |
+    mac_failure | blob_malformed_recipe | recipe_primitive_unknown |
+    unknown_profile | blob_mode_mismatch | blob_malformed |
     blob_version_too_new | blob_too_many_opts | stream_truncated |
     stream_after_final | triple_closed | profile_exists | internal.
 
@@ -77,37 +87,64 @@
 %% ------------------------------------------------------------------
 
 %% Constructs a fresh Pipeline against the named profile. Opts may be
-%% an empty map / list for pure profile defaults.
+%% an empty map / list for pure profile defaults. The session blob is
+%% available through save/1.
 -spec init(iodata() | atom(), opts()) -> {ok, pipeline()} | {error, reason()}.
 init(Profile, Opts) ->
     itb_nif:init_nif(to_bin(Profile), opts_pairs(Opts)).
 
-%% Reconstructs a Pipeline from a blob produced by a sender's init /
-%% rekey, using the blob-embedded masters.
--spec open(iodata() | atom(), binary(), opts()) ->
-          {ok, pipeline()} | {error, reason()}.
-open(Profile, Blob, Opts) ->
-    open(Profile, Blob, Opts, <<>>, <<>>).
+%% Reconstructs a Pipeline from a blob produced by save/1 or rekey/3,
+%% using the blob-embedded masters. The blob's embedded profile
+%% record is the sole structural source — no profile name, no opts.
+-spec load(binary()) -> {ok, pipeline()} | {error, reason()}.
+load(Blob) ->
+    load(Blob, <<>>, <<>>).
 
-%% As open/3 with explicit master overrides. Both masters must be
-%% supplied non-empty (a half-supplied pair is rejected); pass
+%% As load/1 with explicit master overrides. Both masters must be
+%% supplied (a half-supplied pair is rejected Go-side); pass
 %% `<<>>` / `<<>>` for the blob-embedded masters.
--spec open(iodata() | atom(), binary(), opts(), binary(), binary()) ->
+-spec load(binary(), binary(), binary()) ->
           {ok, pipeline()} | {error, reason()}.
-open(Profile, Blob, Opts, PermMaster, WrapMaster) ->
-    itb_nif:open_nif(to_bin(Profile), Blob, opts_pairs(Opts),
-                     PermMaster, WrapMaster).
+load(Blob, PermMaster, WrapMaster) ->
+    itb_nif:load_nif(Blob, PermMaster, WrapMaster).
 
-%% The exported session-bundle blob for the receiver side; refreshed
-%% by rekey/3.
--spec blob(pipeline()) -> {ok, binary()} | {error, reason()}.
-blob(Pipeline) ->
-    itb_nif:blob_nif(Pipeline).
+%% load/1 for a blob stored in a file; the file is read inside the
+%% library.
+-spec load_f(iodata()) -> {ok, pipeline()} | {error, reason()}.
+load_f(Path) ->
+    load_f(Path, <<>>, <<>>).
 
-%% Rotates the parallax + wrapper masters and refreshes the blob. Must
-%% not run concurrently with cipher calls or open stream sessions on
-%% the same Pipeline.
--spec rekey(pipeline(), binary(), binary()) -> ok | {error, reason()}.
+%% As load_f/1 with explicit master overrides.
+-spec load_f(iodata(), binary(), binary()) ->
+          {ok, pipeline()} | {error, reason()}.
+load_f(Path, PermMaster, WrapMaster) ->
+    itb_nif:load_f_nif(to_bin(Path), PermMaster, WrapMaster).
+
+%% The current serialised session blob — the bytes init produced, the
+%% bytes load re-marshalled, or the bytes of the latest rekey/3.
+-spec save(pipeline()) -> {ok, binary()} | {error, reason()}.
+save(Pipeline) ->
+    itb_nif:save_nif(Pipeline).
+
+%% Writes the current session blob to Path inside the library (mode
+%% 0600; the containing directory must exist).
+-spec save_f(pipeline(), iodata()) -> ok | {error, reason()}.
+save_f(Pipeline, Path) ->
+    itb_nif:save_f_nif(Pipeline, to_bin(Path)).
+
+%% Sets the worker cap for every subsequent cipher call. N is clamped,
+%% never rejected: N =< 0 selects auto, 1..256 pins the cap, larger
+%% values are treated as 256. The cap is per-machine tuning and is
+%% never written to the blob.
+-spec max_workers(pipeline(), integer()) -> ok | {error, reason()}.
+max_workers(Pipeline, N) ->
+    itb_nif:max_workers_nif(Pipeline, N).
+
+%% Rotates the parallax + wrapper masters and returns the refreshed
+%% session blob (also observable through save/1). Must not run
+%% concurrently with cipher calls or open stream sessions on the same
+%% Pipeline.
+-spec rekey(pipeline(), binary(), binary()) -> {ok, binary()} | {error, reason()}.
 rekey(Pipeline, PermMaster, WrapMaster) ->
     itb_nif:rekey_nif(Pipeline, PermMaster, WrapMaster).
 
@@ -207,32 +244,51 @@ stream_free(Stream) ->
     itb_nif:stream_free_nif(Stream).
 
 %% ------------------------------------------------------------------
-%% Profile registration
+%% Profile catalogue
 %% ------------------------------------------------------------------
 
-%% Registers a user-defined Triple profile under Name; the opts follow
-%% the register-profile grammar validated by Go. A duplicate name
+%% Decodes the blob's embedded profile record without opening a
+%% Pipeline. No registry read, no primitive probe.
+-spec inspect(binary()) -> {ok, profile()} | {error, reason()}.
+inspect(Blob) ->
+    json_out(itb_nif:inspect_nif(Blob)).
+
+%% Registers a profile record under Name so subsequent init/2 /
+%% lookup/1 calls resolve it. Profile is the record as a map (the
+%% shape inspect/1 / lookup/1 return) or an already-encoded JSON
+%% binary; a <<"name">> key inside it, if present, must be empty or
+%% equal to Name. Validation is performed by libitb; a duplicate name
 %% fails with `{error, {profile_exists, _}}`.
--spec register_profile(iodata() | atom(), opts()) -> ok | {error, reason()}.
-register_profile(Name, Opts) ->
-    itb_nif:register_profile_nif(to_bin(Name), opts_pairs(Opts)).
+-spec register(iodata() | atom(), profile() | iodata()) -> ok | {error, reason()}.
+register(Name, Profile) when is_map(Profile) ->
+    itb_nif:register_nif(to_bin(Name), iolist_to_binary(json:encode(Profile)));
+register(Name, ProfileJson) ->
+    itb_nif:register_nif(to_bin(Name), to_bin(ProfileJson)).
+
+%% The profile record registered under Name (a shipped catalogue entry
+%% or a prior register/2). An unknown name fails with
+%% `{error, {unknown_profile, _}}`.
+-spec lookup(iodata() | atom()) -> {ok, profile()} | {error, reason()}.
+lookup(Name) ->
+    json_out(itb_nif:lookup_nif(to_bin(Name))).
+
+%% The sorted list of every registered profile name.
+-spec profiles() -> [binary()].
+profiles() ->
+    {ok, Names} = json_out(itb_nif:profiles_nif()),
+    Names.
+
+json_out({ok, Json}) -> {ok, json:decode(Json)};
+json_out({error, _} = Err) -> Err.
 
 %% ------------------------------------------------------------------
 %% Runtime + diagnostics
 %% ------------------------------------------------------------------
 
-%% The libitb library version string (e.g. <<"0.3.5">>).
+%% The libitb library version string (e.g. <<"0.4.1">>).
 -spec version() -> {ok, binary()} | {error, reason()}.
 version() ->
     itb_nif:version_nif().
-
-%% The shipped hash primitive roster as `[{Name, WidthBits}]` in
-%% canonical registry order.
--spec hashes() -> [{binary(), pos_integer()}].
-hashes() ->
-    Count = itb_nif:hash_count_nif(),
-    [{itb_nif:hash_name_nif(I), itb_nif:hash_width_nif(I)}
-     || I <- lists:seq(0, Count - 1)].
 
 %% The Go-side diagnostic recorded by the most recent failing libitb
 %% call (process-global last-write-wins; `<<>>` when none). The error
