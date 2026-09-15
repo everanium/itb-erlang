@@ -1,0 +1,73 @@
+%% Single Message round trips across shipped profiles and payload
+%% shapes (empty, 1 byte, structured, CSPRNG-filled).
+
+-module(itb_message_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+
+mac_profile_test_() ->
+    {timeout, 240, fun() -> round_trips(<<"singlemsg-triple-mac-v1">>) end}.
+
+nomac_profile_test_() ->
+    {timeout, 240, fun() -> round_trips(<<"singlemsg-triple-nomac-v1">>) end}.
+
+round_trips(Profile) ->
+    {Sender, Receiver} = itb_test_util:pair(Profile, #{}),
+    Payloads = [<<0>>,
+                <<"any text or binary data">>,
+                binary:copy(<<16#00>>, 4096),
+                binary:copy(<<16#FF>>, 4096),
+                crypto:strong_rand_bytes(100000)],
+    lists:foreach(
+      fun(Plain) ->
+              {ok, Wire} = itb3:encrypt_message(Sender, Plain),
+              ?assert(Wire =/= Plain),
+              {ok, Back} = itb3:decrypt_message(Receiver, Wire),
+              ?assertEqual(Plain, Back)
+      end, Payloads),
+    ok = itb3:free(Receiver),
+    ok = itb3:free(Sender).
+
+%% Two encryptions of the same plaintext must produce different wires
+%% (fresh nonce per message).
+wire_uniqueness_test_() ->
+    {timeout, 120, fun() ->
+        {ok, Sender} = itb3:init(<<"singlemsg-triple-nomac-v1">>, #{}),
+        Plain = crypto:strong_rand_bytes(4096),
+        {ok, Wire1} = itb3:encrypt_message(Sender, Plain),
+        {ok, Wire2} = itb3:encrypt_message(Sender, Plain),
+        ?assertNotEqual(Wire1, Wire2),
+        ok = itb3:free(Sender)
+    end}.
+
+%% Opts pass-through: an explicit keyBits / nonceBits pair reaches Go
+%% and the round trip still holds.
+opts_pass_through_test_() ->
+    {timeout, 120, fun() ->
+        Opts = #{keyBits => 1024, nonceBits => 512},
+        {Sender, Receiver} =
+            itb_test_util:pair(<<"singlemsg-triple-mac-v1">>, Opts),
+        Plain = crypto:strong_rand_bytes(8192),
+        {ok, Wire} = itb3:encrypt_message(Sender, Plain),
+        {ok, Back} = itb3:decrypt_message(Receiver, Wire),
+        ?assertEqual(Plain, Back),
+        ok = itb3:free(Receiver),
+        ok = itb3:free(Sender)
+    end}.
+
+%% Go core rejects zero-length plaintext uniformly with ErrEmptyInput
+%% -> {bad_input, _} before any wire is produced. An empty message has
+%% no cover story: it is always distinguishable at some layer (wire
+%% length, timing, traffic count). Callers for whom an empty signal is
+%% meaningful send a marker byte instead.
+empty_payload_test_() ->
+    {timeout, 60, fun() ->
+        lists:foreach(
+          fun(Profile) ->
+                  {ok, Sender} = itb3:init(Profile, #{}),
+                  ?assertMatch({error, {bad_input, _}},
+                               itb3:encrypt_message(Sender, <<>>)),
+                  ok = itb3:free(Sender)
+          end,
+          [<<"singlemsg-triple-mac-v1">>, <<"singlemsg-triple-nomac-v1">>])
+    end}.
