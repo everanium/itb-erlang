@@ -1,4 +1,4 @@
-%% bench_stream — stream-pump throughput vs plaintext size (Streaming
+%% Stream-pump throughput vs plaintext size (Streaming
 %% Non-AEAD profile) at 1 MiB / 16 MiB / 64 MiB. Each iteration runs a
 %% full incremental session (begin -> write 1 MiB slices, draining the
 %% spool after each write -> end -> drain until finished -> free).
@@ -27,9 +27,9 @@
 -define(PUMP_BUF, 1 bsl 20).
 
 main(_Args) ->
-    %% Bench-scale allocation churn leaks Go scratch heap unboundedly
-    %% without a soft memory cap + aggressive GC; the return values
-    %% report the previous settings, not an error.
+    %% Bench-scale allocation churn grows the Go scratch heap
+    %% unboundedly without a soft memory cap + aggressive GC; the
+    %% return values report the previous settings, not an error.
     _ = itb3:set_memory_limit(4 bsl 30), %% 4 GiB soft cap
     _ = itb3:set_gc_percent(100),         %% balanced GC
 
@@ -99,12 +99,9 @@ drain(Stream) ->
 %% between feed slices can catch and drop those chunks before
 %% drain_collect at end sees them.
 %%
-%% Go core wrapper-nonce batching fix (streams.go +
-%% wrapper.NewWrapWriter) closes the earlier wrapper-nonce split-write
-%% race so a single-chunk pump_all with plain feed would now produce a
-%% wire whose nonce is not stranded, but drain_ready's byte-dropping
-%% behaviour remains fundamentally incompatible with wire collection
-%% across chunk boundaries.
+%% Single-chunk plain feed produces a wire whose nonce is not stranded,
+%% but drain_ready's byte-dropping behaviour remains incompatible with
+%% wire collection across chunk boundaries.
 pump_all(Pipe, Plain) ->
     {ok, Stream} = itb3:encrypt_stream(Pipe),
     ok = feed_noread(Stream, Plain),

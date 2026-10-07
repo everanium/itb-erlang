@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
-# run_tests.sh -- one-step test runner for the Erlang binding. Builds
-# libitb3.so + the C binding archive + the OTP application via
-# build.sh, then invokes `rebar3 eunit`. Forwards any positional
-# arguments through to rebar3 (e.g. one module via
-# `--module=itb_smoke_tests`).
+# One-step test runner for the Erlang binding. Builds libitb3.so +
+# the C binding archive + the OTP application via build.sh, then
+# invokes `rebar3 eunit`. Forwards any positional arguments through
+# to rebar3 (e.g. one module via `--module=itb_smoke_tests`).
 #
 # Usage:
 #   ./run_tests.sh                              # full suite

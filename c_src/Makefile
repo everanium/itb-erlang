@@ -1,6 +1,6 @@
-# Makefile — builds priv/libitb3_nif.so, the NIF shim of the ITB Erlang
-# binding. Invoked by the rebar3 compile pre-hook (see ../rebar.config)
-# and usable standalone.
+# Builds priv/libitb3_nif.so, the NIF shim of the ITB Erlang binding.
+# Invoked by the rebar3 compile pre-hook (see ../rebar.config) and
+# usable standalone.
 #
 # The shim compiles against the C binding's public header
 # (bindings/c/include/itb3.h), links its static archive

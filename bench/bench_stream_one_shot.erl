@@ -1,4 +1,4 @@
-%% bench_stream_one_shot — whole-buffer stream throughput vs plaintext
+%% One-shot stream throughput vs plaintext
 %% size (Streaming Non-AEAD profile) at 1 MiB / 16 MiB / 64 MiB. Each
 %% iteration issues one itb3:encrypt_stream_one_shot/2 or
 %% itb3:decrypt_stream_one_shot/2 call for callers holding the full
@@ -27,9 +27,9 @@
 -define(MIN_ITERS, 3).
 
 main(_Args) ->
-    %% Bench-scale allocation churn leaks Go scratch heap unboundedly
-    %% without a soft memory cap + aggressive GC; the return values
-    %% report the previous settings, not an error.
+    %% Bench-scale allocation churn grows the Go scratch heap
+    %% unboundedly without a soft memory cap + aggressive GC; the
+    %% return values report the previous settings, not an error.
     _ = itb3:set_memory_limit(4 bsl 30), %% 4 GiB soft cap
     _ = itb3:set_gc_percent(100),         %% balanced GC
 

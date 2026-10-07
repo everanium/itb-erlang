@@ -1,4 +1,4 @@
-%% itb_test_util — shared helpers for the EUnit suite. Not a test
+%% Shared helpers for the EUnit suite. Not a test
 %% module itself (no *_test functions).
 
 -module(itb_test_util).

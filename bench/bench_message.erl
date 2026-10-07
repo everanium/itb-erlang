@@ -1,4 +1,4 @@
-%% bench_message — encrypt_message throughput vs plaintext size
+%% encrypt_message throughput vs plaintext size
 %% (Single Message profile) at 1 MiB / 16 MiB / 64 MiB.
 %%
 %% Env-var overrides (defaults match the root Go BENCH3.md pin so the
@@ -24,9 +24,9 @@
 -define(MIN_ITERS, 3).
 
 main(_Args) ->
-    %% Bench-scale allocation churn leaks Go scratch heap unboundedly
-    %% without a soft memory cap + aggressive GC; the return values
-    %% report the previous settings, not an error.
+    %% Bench-scale allocation churn grows the Go scratch heap
+    %% unboundedly without a soft memory cap + aggressive GC; the
+    %% return values report the previous settings, not an error.
     _ = itb3:set_memory_limit(4 bsl 30), %% 4 GiB soft cap
     _ = itb3:set_gc_percent(100),         %% balanced GC
 

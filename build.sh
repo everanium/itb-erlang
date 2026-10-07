@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# build.sh -- one-step build for the Erlang binding: libitb3.so + the C
-# binding's static archive + the OTP application (NIF shim compiled by
-# the rebar3 compile pre-hook) + the eitb demonstrator. Prerequisites
-# (Go, a C11 compiler, GNU make, Erlang/OTP 27+, rebar3) must be
-# installed separately; see README.md "Prerequisites".
+# One-step build for the Erlang binding: libitb3.so + the C binding's
+# static archive + the OTP application (NIF shim compiled by the rebar3
+# compile pre-hook) + the loop stress harness + the eitb demonstrator.
+# Prerequisites (Go, a C11 compiler, GNU make, Erlang/OTP 27+, rebar3)
+# must be installed separately; see README.md "Prerequisites".
 #
 # The build starts by removing every artefact this binding owns, so no
 # output of an earlier build can survive into this one and mask a
@@ -54,6 +54,7 @@ ARTEFACTS=(
     'c_src/*.o'
     'bench/*.beam'
     'eitb/*.beam'
+    'loop/*.beam'
 )
 
 # Containment is checked against the physical path, so the candidate
@@ -121,6 +122,11 @@ rebar3 compile
 # and cannot carry a stale compilation of its own. Running `version`
 # here proves it parses and resolves the ebin directory just built --
 # the failure mode a pre-compiled launcher would hide.
+# The loop stress harness compiles with the same options rebar3 uses
+# for the binding itself, so a warning there fails the build here too.
+echo "==> compiling loop utility"
+erlc -I loop -o loop +debug_info +warnings_as_errors loop/*.erl
+
 echo "==> eitb"
 ITB_LIBITB3_PATH="$REPO_ROOT/dist/linux-amd64/libitb3.so" \
 LD_LIBRARY_PATH="$REPO_ROOT/dist/linux-amd64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

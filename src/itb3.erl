@@ -1,4 +1,4 @@
-%% itb3 — public API of the ITB Erlang binding.
+%% Public API of the ITB Erlang binding.
 %%
 %% Thin proxy over the ITB C binding's Triple Pipeline surface
 %% (bindings/c, itb3.h) through the NIF shim in c_src/libitb3_nif.c. No
@@ -42,9 +42,10 @@
          encrypt_stream/1, decrypt_stream/1,
          stream_write/2, stream_end/1, stream_read/1, stream_read/2,
          stream_free/1,
-         inspect/1, register/2, lookup/1, profiles/0,
-         version/0, last_error/0,
-         set_memory_limit/1, set_gc_percent/1]).
+         inspect/1, register/2, lookup/1, profiles/0, hash_names/0,
+         version/0, drbg_auto_tier/0, last_error/0, status_code/1,
+         set_memory_limit/1, set_gc_percent/1, set_gomaxprocs/1,
+         write_heap_profile/1, pool_stats_len/0, pool_stats/0]).
 
 -export_type([pipeline/0, stream/0, opts/0, profile/0, reason/0]).
 
@@ -275,6 +276,15 @@ profiles() ->
     {ok, Names} = json_out(itb3_nif:profiles_nif()),
     Names.
 
+%% The shipped hash-primitive registry in canonical order. The names
+%% this returns are the ones init/2 accepts under the `innerHash` opts
+%% key; a caller validating a primitive name against the registry
+%% reads it from here rather than carrying a list of its own.
+-spec hash_names() -> [binary()].
+hash_names() ->
+    {ok, Names} = json_out(itb3_nif:hash_names_nif()),
+    Names.
+
 json_out({ok, Json}) -> {ok, json:decode(Json)};
 json_out({error, _} = Err) -> Err.
 
@@ -287,6 +297,14 @@ json_out({error, _} = Err) -> Err.
 version() ->
     itb3_nif:version_nif().
 
+%% The fill cipher the auto DRBG tier selected on this host
+%% (<<"aes-256-ctr">> or <<"chacha20">>): the tier a Pipeline uses
+%% when its `drbg` option is empty, resolved per host and recorded in
+%% no blob.
+-spec drbg_auto_tier() -> {ok, binary()} | {error, reason()}.
+drbg_auto_tier() ->
+    itb3_nif:drbg_auto_tier_nif().
+
 %% The Go-side diagnostic recorded by the most recent failing libitb3
 %% call (process-global last-write-wins; `<<>>` when none). The error
 %% tuples already carry this detail — direct use is for ad-hoc
@@ -294,6 +312,36 @@ version() ->
 -spec last_error() -> binary().
 last_error() ->
     itb3_nif:last_error_nif().
+
+%% The numeric libitb3 status code behind a status atom, mirroring the
+%% C ABI enum. The error tuples carry the atom, which is what Erlang
+%% code matches on; the number is what a diagnostic quotes when it has
+%% to name the code the library itself uses. An atom outside the table
+%% is the internal-error code.
+-spec status_code(status() | atom()) -> integer().
+status_code(ok) -> 0;
+status_code(bad_hash) -> 1;
+status_code(bad_key_bits) -> 2;
+status_code(bad_handle) -> 3;
+status_code(bad_input) -> 4;
+status_code(buffer_too_small) -> 5;
+status_code(encrypt_failed) -> 6;
+status_code(decrypt_failed) -> 7;
+status_code(seed_width_mix) -> 8;
+status_code(bad_mac) -> 9;
+status_code(mac_failure) -> 10;
+status_code(blob_malformed_recipe) -> 11;
+status_code(recipe_primitive_unknown) -> 12;
+status_code(unknown_profile) -> 13;
+status_code(blob_mode_mismatch) -> 19;
+status_code(blob_malformed) -> 20;
+status_code(blob_version_too_new) -> 21;
+status_code(blob_too_many_opts) -> 22;
+status_code(stream_truncated) -> 23;
+status_code(stream_after_final) -> 24;
+status_code(triple_closed) -> 25;
+status_code(profile_exists) -> 26;
+status_code(_) -> 99.
 
 %% Sets the Go runtime's soft heap limit in bytes; returns the
 %% previous limit. A negative value queries without changing.
@@ -306,6 +354,37 @@ set_memory_limit(Bytes) ->
 -spec set_gc_percent(integer()) -> integer().
 set_gc_percent(Pct) ->
     itb3_nif:set_gc_percent_nif(Pct).
+
+%% Sets the Go runtime's GOMAXPROCS; returns the previous value. Zero
+%% or a negative value queries without changing.
+-spec set_gomaxprocs(integer()) -> integer().
+set_gomaxprocs(N) ->
+    itb3_nif:set_gomaxprocs_nif(N).
+
+%% Writes the Go runtime's heap profile (pprof format) to Path after
+%% one forced garbage collection. An empty path falls back to the
+%% ITB_MEMPROFILE environment variable; a path that is still empty, or
+%% a file-system failure, is `{error, {bad_input, _}}`.
+-spec write_heap_profile(iodata()) -> ok | {error, reason()}.
+write_heap_profile(Path) ->
+    itb3_nif:write_heap_profile_nif(to_bin(Path)).
+
+%% Number of counter slots pool_stats/0 returns. Size a reader from
+%% this call, never from a constant.
+-spec pool_stats_len() -> integer().
+pool_stats_len() ->
+    itb3_nif:pool_stats_len_nif().
+
+%% The library's pool hit / miss counters in slot order, as one list
+%% of monotonically increasing totals since library load. Slot 0
+%% carries the hash-array tier count T; tier I occupies the five slots
+%% at 1 + 5*I (starter width, get, new, regrow, new_bytes); the
+%% scratch byte pool and the parallax chunk pool occupy the eight
+%% slots at 1 + 5*T. Differencing two snapshots gives the figures of
+%% one measured window.
+-spec pool_stats() -> {ok, [integer()]} | {error, reason()}.
+pool_stats() ->
+    itb3_nif:pool_stats_nif().
 
 %% ------------------------------------------------------------------
 %% Term normalisation

@@ -31,6 +31,10 @@ version_test() ->
     {ok, Version} = itb3:version(),
     ?assert(byte_size(Version) > 0).
 
+drbg_auto_tier_test() ->
+    {ok, Tier} = itb3:drbg_auto_tier(),
+    ?assert(lists:member(Tier, [<<"aes-256-ctr">>, <<"chacha20">>])).
+
 save_load_round_trip_test_() ->
     {timeout, 120, fun() ->
         {ok, Sender} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{}),
@@ -101,7 +105,7 @@ inspect_lookup_profiles_test() ->
     ?assertNot(maps:is_key(<<"nonce_bits">>, Looked)),
     ?assertNot(maps:is_key(<<"barrier_fill">>, Looked)),
     ?assertEqual(Looked,
-                 maps:without([<<"nonce_bits">>, <<"barrier_fill">>], Record)),
+                 maps:without([<<"nonce_bits">>, <<"barrier_fill">>, <<"container_mode">>], Record)),
     ?assertMatch({error, {bad_input, _}}, itb3:inspect(<<"not a blob">>)),
     ?assertMatch({error, {unknown_profile, _}}, itb3:lookup(<<"no-such-profile">>)),
     Names = itb3:profiles(),
@@ -135,3 +139,51 @@ runtime_knobs_test() ->
     ?assertEqual(Prev, itb3:set_memory_limit(-1)),
     PrevGC = itb3:set_gc_percent(-2),
     ?assert(is_integer(PrevGC)).
+
+%% The drbg opts key selects the fill primitive: the session round
+%% trips through a loaded blob, inspect reports the key, and an
+%% inspected record (inspection-only fields dropped) re-registers with
+%% the key kept.
+drbg_round_trip_test_() ->
+    {timeout, 120, fun() ->
+        lists:foreach(
+          fun(Drbg) ->
+                  {ok, Sender} = itb3:init(<<"singlemsg-triple-mac-v1">>,
+                                           #{drbg => Drbg}),
+                  {ok, Blob} = itb3:save(Sender),
+                  {ok, Receiver} = itb3:load(Blob),
+                  Plain = <<"drbg round-trip payload">>,
+                  {ok, Wire} = itb3:encrypt_message(Receiver, Plain),
+                  ?assertEqual({ok, Plain}, itb3:decrypt_message(Sender, Wire)),
+                  {ok, Record} = itb3:inspect(Blob),
+                  ?assertEqual(Drbg, maps:get(<<"drbg">>, Record)),
+                  ok = itb3:free(Receiver),
+                  ok = itb3:free(Sender)
+          end, [<<"csprng">>, <<"aesitb128">>])
+    end}.
+
+drbg_unknown_name_test() ->
+    {error, {recipe_primitive_unknown, Detail}} =
+        itb3:init(<<"singlemsg-triple-mac-v1">>, #{drbg => <<"nope">>}),
+    ?assertNotEqual(nomatch, binary:match(Detail, <<"nope">>)).
+
+drbg_default_absent_test() ->
+    {ok, Pipe} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{}),
+    {ok, Blob} = itb3:save(Pipe),
+    ok = itb3:free(Pipe),
+    {ok, Record} = itb3:inspect(Blob),
+    ?assertNot(maps:is_key(<<"drbg">>, Record)),
+    {ok, Looked} = itb3:lookup(<<"singlemsg-triple-mac-v1">>),
+    ?assertNot(maps:is_key(<<"drbg">>, Looked)).
+
+drbg_register_copy_keeps_key_test() ->
+    {ok, Pipe} = itb3:init(<<"singlemsg-triple-mac-v1">>,
+                           #{drbg => <<"csprng">>}),
+    {ok, Blob} = itb3:save(Pipe),
+    ok = itb3:free(Pipe),
+    {ok, Record} = itb3:inspect(Blob),
+    Copy = maps:without([<<"name">>, <<"nonce_bits">>, <<"barrier_fill">>,
+                         <<"container_mode">>], Record),
+    ok = itb3:register(<<"erlang-binding-test-drbg-copy">>, Copy),
+    {ok, Looked} = itb3:lookup(<<"erlang-binding-test-drbg-copy">>),
+    ?assertEqual(<<"csprng">>, maps:get(<<"drbg">>, Looked)).

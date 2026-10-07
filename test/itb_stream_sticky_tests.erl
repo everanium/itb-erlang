@@ -27,7 +27,7 @@ sticky_mac_failure() ->
 
 %% Flip positions walk the wire body (starting at the 3/4 mark with a
 %% 1031-byte stride) so the probe stays clear of the outer framing
-%% header, whose corruption fails structurally before authentication.
+%% header, whose corruption can fail structurally before authentication.
 probe(_Receiver, _Wire, Attempt) when Attempt >= 32 ->
     false;
 probe(Receiver, Wire, Attempt) ->

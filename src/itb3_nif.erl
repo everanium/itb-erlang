@@ -1,4 +1,4 @@
-%% itb3_nif — raw NIF stub declarations for the ITB Erlang binding.
+%% Raw NIF stub declarations for the ITB Erlang binding.
 %%
 %% Private module: consumers use the `itb3` module. Every function here
 %% is replaced by its C implementation from priv/libitb3_nif.so at load
@@ -16,8 +16,10 @@
          stream_write_nif/2, stream_end_nif/1, stream_read_nif/2,
          stream_free_nif/1,
          inspect_nif/1, register_nif/2, lookup_nif/1, profiles_nif/0,
-         version_nif/0, last_error_nif/0,
-         set_memory_limit_nif/1, set_gc_percent_nif/1]).
+         version_nif/0, drbg_auto_tier_nif/0, last_error_nif/0,
+         set_memory_limit_nif/1, set_gc_percent_nif/1,
+         set_gomaxprocs_nif/1, write_heap_profile_nif/1,
+         pool_stats_len_nif/0, pool_stats_nif/0, hash_names_nif/0]).
 
 -on_load(load/0).
 
@@ -103,6 +105,9 @@ profiles_nif() ->
 version_nif() ->
     erlang:nif_error(itb3_nif_not_loaded).
 
+drbg_auto_tier_nif() ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
 last_error_nif() ->
     erlang:nif_error(itb3_nif_not_loaded).
 
@@ -110,4 +115,19 @@ set_memory_limit_nif(_Bytes) ->
     erlang:nif_error(itb3_nif_not_loaded).
 
 set_gc_percent_nif(_Pct) ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+set_gomaxprocs_nif(_N) ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+write_heap_profile_nif(_Path) ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+pool_stats_len_nif() ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+pool_stats_nif() ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+hash_names_nif() ->
     erlang:nif_error(itb3_nif_not_loaded).

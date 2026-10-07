@@ -1,5 +1,5 @@
 /*
- * libitb3_nif.c — Erlang NIF shim for the ITB Erlang binding.
+ * Erlang NIF shim for the ITB Erlang binding.
  *
  * Thin proxy over the ITB C binding (bindings/c): every entry wraps
  * one itb_pipeline_* / itb_stream_* / diagnostics call from <itb3.h>
@@ -780,6 +780,20 @@ static ERL_NIF_TERM version_nif(ErlNifEnv *env, int argc,
     return make_ok(env, make_bin(env, v, strlen(v)));
 }
 
+/* drbg_auto_tier_nif() -> {ok, NameBin} | {error, _} */
+static ERL_NIF_TERM drbg_auto_tier_nif(ErlNifEnv *env, int argc,
+                                       const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    (void)argv;
+    const char *t = itb_drbg_auto_tier();
+    if (t == NULL) {
+        return make_error_msg(env, ITB_STATUS_INTERNAL,
+                              "libitb3 auto DRBG tier unavailable");
+    }
+    return make_ok(env, make_bin(env, t, strlen(t)));
+}
+
 /* last_error_nif() -> DetailBin */
 static ERL_NIF_TERM last_error_nif(ErlNifEnv *env, int argc,
                                    const ERL_NIF_TERM argv[])
@@ -812,6 +826,92 @@ static ERL_NIF_TERM set_gc_percent_nif(ErlNifEnv *env, int argc,
         return enif_make_badarg(env);
     }
     return enif_make_int(env, itb_set_gc_percent(pct));
+}
+
+/* set_gomaxprocs_nif(N) -> PreviousN */
+static ERL_NIF_TERM set_gomaxprocs_nif(ErlNifEnv *env, int argc,
+                                       const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    int n = 0;
+    if (!enif_get_int(env, argv[0], &n)) {
+        return enif_make_badarg(env);
+    }
+    return enif_make_int(env, itb_set_gomaxprocs((int32_t)n));
+}
+
+/* write_heap_profile_nif(PathBin) -> ok | {error, _} */
+static ERL_NIF_TERM write_heap_profile_nif(ErlNifEnv *env, int argc,
+                                           const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    char *path = term_to_cstr(env, argv[0]);
+    if (path == NULL) {
+        return enif_make_badarg(env);
+    }
+    itb_status st = itb_write_heap_profile(path);
+    enif_free(path);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return enif_make_atom(env, "ok");
+}
+
+/* pool_stats_len_nif() -> SlotCount */
+static ERL_NIF_TERM pool_stats_len_nif(ErlNifEnv *env, int argc,
+                                       const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    (void)argv;
+    return enif_make_int(env, (int)itb_pool_stats_len());
+}
+
+/* pool_stats_nif() -> {ok, [Counter]} | {error, _}
+ *
+ * The slot vector crosses the boundary as one list of integers in
+ * slot order; the caller reads the tier count from slot 0 and the
+ * layout from there, exactly as a C caller does. The buffer is sized
+ * from itb_pool_stats_len() on every call rather than from a
+ * constant, so a library that grows a tier is followed without a
+ * rebuild of this shim. */
+static ERL_NIF_TERM pool_stats_nif(ErlNifEnv *env, int argc,
+                                   const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    (void)argv;
+    size_t cap = itb_pool_stats_len();
+    if (cap == 0) {
+        return make_error_msg(env, ITB_STATUS_INTERNAL,
+                              "libitb3 reports no pool counters");
+    }
+    int64_t *slots = enif_alloc(cap * sizeof(int64_t));
+    if (slots == NULL) {
+        return make_error_msg(env, ITB_STATUS_INTERNAL,
+                              "pool counter buffer allocation failed");
+    }
+    size_t len = 0;
+    itb_status st = itb_pool_stats(slots, cap, &len);
+    if (st != ITB_STATUS_OK) {
+        enif_free(slots);
+        return make_error(env, st);
+    }
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = len; i > 0; i--) {
+        list = enif_make_list_cell(env, enif_make_int64(env, slots[i - 1]), list);
+    }
+    enif_free(slots);
+    return make_ok(env, list);
+}
+
+/* hash_names_nif() -> {ok, NamesJsonBin} | {error, _} */
+static ERL_NIF_TERM hash_names_nif(ErlNifEnv *env, int argc,
+                                   const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    (void)argv;
+    char *json = NULL;
+    itb_status st = itb_hash_names(&json);
+    return json_result(env, st, json);
 }
 
 /* ------------------------------------------------------------------ */
@@ -859,10 +959,17 @@ static ErlNifFunc nif_funcs[] = {
     {"lookup_nif", 1, lookup_nif, 0},
     {"profiles_nif", 0, profiles_nif, 0},
     {"version_nif", 0, version_nif, 0},
+    {"drbg_auto_tier_nif", 0, drbg_auto_tier_nif, 0},
     {"last_error_nif", 0, last_error_nif, 0},
     {"set_memory_limit_nif", 1, set_memory_limit_nif,
      ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"set_gc_percent_nif", 1, set_gc_percent_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"set_gomaxprocs_nif", 1, set_gomaxprocs_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"write_heap_profile_nif", 1, write_heap_profile_nif,
+     ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"pool_stats_len_nif", 0, pool_stats_len_nif, 0},
+    {"pool_stats_nif", 0, pool_stats_nif, 0},
+    {"hash_names_nif", 0, hash_names_nif, 0},
 };
 
 ERL_NIF_INIT(itb3_nif, nif_funcs, load, NULL, NULL, NULL)

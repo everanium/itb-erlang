@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# Launcher for the loop stress harness of the Erlang binding: starts
+# the emulator on the compiled binding and the compiled utility and
+# hands it every argument unchanged. build.sh compiles both; this
+# script builds nothing.
+#
+# The emulator is started with the break handler off and the utility
+# is run in the background rather than exec'd, so that an interrupt
+# can be translated here into the termination signal the utility does
+# receive: the emulator owns SIGINT below the signal server and never
+# lets Erlang code see it, while SIGTERM reaches the utility's own
+# handler and starts its graceful stop. The child's exit status is
+# passed through unchanged.
+#
+# Usage:
+#   ./loop/loop --duration 2m --shape both
+
+set -eu
+set -o pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+EBIN="$HERE/../_build/default/lib/libitb3/ebin"
+
+if [ ! -f "$EBIN/itb3.beam" ]; then
+    echo "loop: binding not compiled, run ./build.sh first: $EBIN" >&2
+    exit 1
+fi
+if [ ! -f "$HERE/loop_main.beam" ]; then
+    echo "loop: utility not compiled, run ./build.sh first: $HERE" >&2
+    exit 1
+fi
+
+# -noshell keeps the emulator's banner and line editor off stdout and
+# -boot no_dot_erlang skips the user's ~/.erlang, so the utility owns
+# every byte the process prints; +Bi leaves the interrupt to the trap
+# below. -extra hands the whole command line through as plain
+# arguments.
+erl +Bi -noshell -boot no_dot_erlang -pa "$EBIN" -pa "$HERE" \
+    -s loop_main start -extra "$@" &
+child=$!
+
+trap 'kill -TERM "$child" 2>/dev/null || true' INT TERM
+
+set +e
+wait "$child"
+rc=$?
+# A trapped signal makes the first wait return 128 + signal number
+# rather than the child's status; waiting again yields the status the
+# child actually exited with.
+if [ "$rc" -gt 128 ]; then
+    wait "$child"
+    rc=$?
+fi
+exit "$rc"
