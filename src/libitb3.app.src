@@ -1,7 +1,7 @@
 {application, libitb3, [
     {description,
      "ITB Symmetric Cipher Construction with Ambiguity-Based Security - Erlang"},
-    {vsn, "0.5.1"},
+    {vsn, "0.5.5"},
     {licenses, ["Apache-2.0"]},
     {links, [{"GitHub", "https://github.com/everanium/itb"},
              {"Issues", "https://github.com/everanium/itb/issues"}]},
