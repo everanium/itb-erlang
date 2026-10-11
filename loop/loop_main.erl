@@ -611,7 +611,8 @@ fill_keystream_layers(Name, WantParallax, WantWrapper) ->
 %% blob back, and the bytes are the ones Init produced. Later blob
 %% reopens use the retained blob; save is never called again.
 build_pipeline(Cfg, Profile) ->
-    Base = [{innerHash, Cfg#cfg.hash},
+    Base = [{mode, integer_to_list(Cfg#cfg.blob_mode)},
+            {innerHash, Cfg#cfg.hash},
             {macName, Cfg#cfg.mac},
             {withParallax, atom_to_list(Cfg#cfg.parallax)},
             {withWrapper, atom_to_list(Cfg#cfg.wrapper)},
@@ -644,48 +645,10 @@ build_pipeline(Cfg, Profile) ->
                             itb3:free(Pipe),
                             error;
                         {ok, Blob} ->
-                            apply_blob_mode(Cfg, Profile, Pipe, Blob)
+                            log_pipeline_initialised(Profile, Blob),
+                            {ok, Pipe, Blob}
                     end
             end
-    end.
-
-%% The sizing mode is not an opts knob: under --blob-mode 2 the Init
-%% blob is edited and the pipeline reopened from it, so the retained
-%% blob (the one blob-cycle reopens from) carries the edited mode.
-apply_blob_mode(#cfg{blob_mode = 1}, Profile, Pipe, Blob) ->
-    log_pipeline_initialised(Profile, Blob),
-    {ok, Pipe, Blob};
-apply_blob_mode(#cfg{blob_mode = Mode}, Profile, Pipe, Blob) ->
-    itb3:free(Pipe),
-    case edit_inner_blob_mode(Blob, Mode) of
-        {error, Detail} ->
-            err("rewrite blob mode: ~ts", [Detail]),
-            error;
-        {ok, Edited} ->
-            case itb3:load(Edited) of
-                {error, {Status, Detail}} ->
-                    err("reload Mode 2 blob: ~s", [status_text(Status, Detail)]),
-                    error;
-                {ok, Reloaded} ->
-                    log_pipeline_initialised(Profile, Edited),
-                    {ok, Reloaded, Edited}
-            end
-    end.
-
-%% Sets the inner blob's integer "mode" (1 = per-region, 2 =
-%% per-container) of a session blob through the OTP json module. The
-%% profile record "p" carries its own string "mode"; the target is the
-%% one under "ib". Integers and strings round-trip unchanged; only the
-%% key order may differ.
-edit_inner_blob_mode(Blob, Mode) ->
-    try json:decode(Blob) of
-        #{<<"ib">> := #{<<"mode">> := M} = Inner} = Session when is_integer(M) ->
-            {ok, iolist_to_binary(json:encode(Session#{<<"ib">> := Inner#{<<"mode">> := Mode}}))};
-        _ ->
-            {error, "inner blob mode field not found"}
-    catch
-        error:Reason ->
-            {error, io_lib:format("~p", [Reason])}
     end.
 
 %% Prints the construction line with the recipe read back from the

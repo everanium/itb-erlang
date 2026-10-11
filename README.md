@@ -91,7 +91,7 @@ cap) as a map or proplist. The resolved shape is written into the
 blob, so the receiver loads it with no opts of its own:
 
 ```erlang
-Opts = #{chunkSize => 65536, withWrapper => false},
+Opts = #{mode => 2, chunkSize => 65536, withWrapper => false},
 {ok, Sender} = itb3:init(<<"singlemsg-triple-mac-v1">>, Opts),
 {ok, Blob} = itb3:save(Sender),
 {ok, Receiver} = itb3:load(Blob).

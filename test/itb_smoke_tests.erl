@@ -101,9 +101,11 @@ inspect_lookup_profiles_test() ->
     ?assert(maps:get(<<"keybits">>, Record) > 0),
     ?assert(maps:is_key(<<"nonce_bits">>, Record)),
     ?assert(maps:is_key(<<"barrier_fill">>, Record)),
+    ?assertEqual(1, maps:get(<<"container_mode">>, Record)),
     {ok, Looked} = itb3:lookup(<<"singlemsg-triple-mac-v1">>),
     ?assertNot(maps:is_key(<<"nonce_bits">>, Looked)),
     ?assertNot(maps:is_key(<<"barrier_fill">>, Looked)),
+    ?assertNot(maps:is_key(<<"container_mode">>, Looked)),
     ?assertEqual(Looked,
                  maps:without([<<"nonce_bits">>, <<"barrier_fill">>, <<"container_mode">>], Record)),
     ?assertMatch({error, {bad_input, _}}, itb3:inspect(<<"not a blob">>)),
@@ -116,6 +118,13 @@ inspect_lookup_profiles_test() ->
               {ok, R} = itb3:lookup(Name),
               ?assertEqual(Name, maps:get(<<"name">>, R))
       end, Names).
+
+inspect_opts_mode_test() ->
+    {ok, Pipe} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{mode => 2}),
+    {ok, Blob} = itb3:save(Pipe),
+    ok = itb3:free(Pipe),
+    {ok, Record} = itb3:inspect(Blob),
+    ?assertEqual(2, maps:get(<<"container_mode">>, Record)).
 
 max_workers_test() ->
     {ok, Pipe} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{}),
