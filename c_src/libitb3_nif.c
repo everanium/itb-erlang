@@ -285,6 +285,95 @@ static ERL_NIF_TERM wrap_pipeline(ErlNifEnv *env, itb_pipeline *pipe)
     return make_ok(env, term);
 }
 
+/* init_keys_nif(ProfileBin, OptsPairs, MastersList) -> {ok, Pipeline} | {error, _} */
+static ERL_NIF_TERM init_keys_nif(ErlNifEnv *env, int argc,
+                                  const ERL_NIF_TERM argv[])
+{
+    (void)argc;
+    unsigned int masters_count = 0;
+    if (!enif_get_list_length(env, argv[2], &masters_count)) {
+        return enif_make_badarg(env);
+    }
+    char *profile = term_to_cstr(env, argv[0]);
+    if (profile == NULL) {
+        return enif_make_badarg(env);
+    }
+    itb_opts *opts = NULL;
+    int rc = opts_from_list(env, argv[1], &opts);
+    if (rc <= 0) {
+        enif_free(profile);
+        return rc == 0 ? enif_make_badarg(env)
+                       : make_error_msg(env, ITB_STATUS_INTERNAL,
+                                        "opts allocation failed");
+    }
+    size_t *master_lens = NULL;
+    ErlNifBinary *bins = NULL;
+    if (masters_count > 0) {
+        master_lens = enif_alloc((size_t)masters_count * sizeof(size_t));
+        bins = enif_alloc((size_t)masters_count * sizeof(ErlNifBinary));
+        if (master_lens == NULL || bins == NULL) {
+            enif_free(master_lens);
+            enif_free(bins);
+            enif_free(profile);
+            itb_opts_free(opts);
+            return make_error_msg(env, ITB_STATUS_INTERNAL,
+                                  "master buffer allocation failed");
+        }
+    }
+    size_t masters_flat_len = 0;
+    ERL_NIF_TERM head, tail = argv[2];
+    for (unsigned int i = 0; i < masters_count; i++) {
+        if (!enif_get_list_cell(env, tail, &head, &tail) ||
+            !enif_inspect_iolist_as_binary(env, head, &bins[i])) {
+            enif_free(master_lens);
+            enif_free(bins);
+            enif_free(profile);
+            itb_opts_free(opts);
+            return enif_make_badarg(env);
+        }
+        master_lens[i] = bins[i].size;
+        masters_flat_len += bins[i].size;
+    }
+    uint8_t *masters_flat = NULL;
+    if (masters_flat_len > 0) {
+        masters_flat = enif_alloc(masters_flat_len);
+        if (masters_flat == NULL) {
+            enif_free(master_lens);
+            enif_free(bins);
+            enif_free(profile);
+            itb_opts_free(opts);
+            return make_error_msg(env, ITB_STATUS_INTERNAL,
+                                  "master buffer allocation failed");
+        }
+        size_t off = 0;
+        for (unsigned int i = 0; i < masters_count; i++) {
+            if (bins[i].size > 0) {
+                memcpy(masters_flat + off, bins[i].data, bins[i].size);
+                off += bins[i].size;
+            }
+        }
+    }
+    enif_free(bins);
+    itb_pipeline *pipe = NULL;
+    itb_status st = itb_pipeline_init_keys(
+        profile, opts, masters_flat, masters_flat_len,
+        master_lens, (size_t)masters_count, &pipe);
+    if (masters_flat != NULL) {
+        volatile uint8_t *vp = masters_flat;
+        for (size_t i = 0; i < masters_flat_len; i++) {
+            vp[i] = 0;
+        }
+        enif_free(masters_flat);
+    }
+    enif_free(master_lens);
+    enif_free(profile);
+    itb_opts_free(opts);
+    if (st != ITB_STATUS_OK) {
+        return make_error(env, st);
+    }
+    return wrap_pipeline(env, pipe);
+}
+
 /* load_nif(BlobBin, PermBin, WrapBin) -> {ok, Pipeline} | {error, _}
  * Empty Perm + Wrap means "use the blob-embedded masters"; the blob's
  * embedded profile record is the sole structural source. */
@@ -933,6 +1022,7 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)
 
 static ErlNifFunc nif_funcs[] = {
     {"init_nif", 2, init_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
+    {"init_keys_nif", 3, init_keys_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"load_nif", 3, load_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"load_f_nif", 3, load_f_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"save_nif", 1, save_nif, 0},

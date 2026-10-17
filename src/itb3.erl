@@ -35,7 +35,7 @@
 
 -module(itb3).
 
--export([init/2, load/1, load/3, load_f/1, load_f/3,
+-export([init/2, init_keys/2, init_keys/3, load/1, load/3, load_f/1, load_f/3,
          save/1, save_f/2, max_workers/2, rekey/3, free/1,
          encrypt_message/2, decrypt_message/2,
          encrypt_stream_one_shot/2, decrypt_stream_one_shot/2,
@@ -90,6 +90,21 @@
 -spec init(iodata() | atom(), opts()) -> {ok, pipeline()} | {error, reason()}.
 init(Profile, Opts) ->
     itb3_nif:init_nif(to_bin(Profile), opts_pairs(Opts)).
+
+%% Deterministically constructs a Pipeline from eight caller-supplied
+%% master keys (one per canonical seed slot 0..7) against the named
+%% profile and options. The eight master keys must come from
+%% independent entropy or key-agreement sources; never derive all
+%% eight keys from a single secret or a single KDF parent key.
+-spec init_keys(iodata() | atom(), [iodata()]) ->
+          {ok, pipeline()} | {error, reason()}.
+init_keys(Profile, Masters) ->
+    init_keys(Profile, #{}, Masters).
+
+-spec init_keys(iodata() | atom(), opts(), [iodata()]) ->
+          {ok, pipeline()} | {error, reason()}.
+init_keys(Profile, Opts, Masters) when is_list(Masters) ->
+    itb3_nif:init_keys_nif(to_bin(Profile), opts_pairs(Opts), Masters).
 
 %% Reconstructs a Pipeline from a blob produced by save/1 or rekey/3,
 %% using the blob-embedded masters. The blob's embedded profile
@@ -292,7 +307,7 @@ json_out({error, _} = Err) -> Err.
 %% Runtime + diagnostics
 %% ------------------------------------------------------------------
 
-%% The libitb3 library version string (e.g. <<"0.7.2">>).
+%% The libitb3 library version string (e.g. <<"0.7.3">>).
 -spec version() -> {ok, binary()} | {error, reason()}.
 version() ->
     itb3_nif:version_nif().

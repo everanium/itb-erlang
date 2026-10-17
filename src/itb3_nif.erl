@@ -8,7 +8,7 @@
 
 -module(itb3_nif).
 
--export([init_nif/2, load_nif/3, load_f_nif/3, save_nif/1, save_f_nif/2,
+-export([init_nif/2, init_keys_nif/3, load_nif/3, load_f_nif/3, save_nif/1, save_f_nif/2,
          max_workers_nif/2, rekey_nif/3, free_nif/1,
          encrypt_message_nif/2, decrypt_message_nif/2,
          encrypt_stream_one_shot_nif/2, decrypt_stream_one_shot_nif/2,
@@ -37,6 +37,9 @@ load() ->
     erlang:load_nif(So, 0).
 
 init_nif(_Profile, _Opts) ->
+    erlang:nif_error(itb3_nif_not_loaded).
+
+init_keys_nif(_Profile, _Opts, _Masters) ->
     erlang:nif_error(itb3_nif_not_loaded).
 
 load_nif(_Blob, _PermMaster, _WrapMaster) ->

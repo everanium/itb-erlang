@@ -27,6 +27,27 @@ smoke_round_trip() ->
     ok = itb3:free(Receiver),
     ok = itb3:free(Sender).
 
+init_keys_test_() ->
+    {timeout, 120, fun() ->
+        Masters = [binary:copy(<<(16#11 * I)>>, 32) || I <- lists:seq(1, 8)],
+        {ok, P1} = itb3:init_keys(<<"singlemsg-triple-mac-v1">>, Masters),
+        {ok, P2} = itb3:init_keys(<<"singlemsg-triple-mac-v1">>, #{}, Masters),
+        {ok, B1} = itb3:save(P1),
+        {ok, B2} = itb3:save(P2),
+        ?assertEqual(B1, B2),
+        Plain = <<"init_keys determinism payload">>,
+        {ok, Wire} = itb3:encrypt_message(P1, Plain),
+        ?assertEqual({ok, Plain}, itb3:decrypt_message(P2, Wire)),
+        ok = itb3:free(P2),
+        ok = itb3:free(P1),
+        Dup = [hd(Masters), hd(Masters) | tl(tl(Masters))],
+        ?assertMatch({error, {bad_input, _}},
+                     itb3:init_keys(<<"singlemsg-triple-mac-v1">>, Dup)),
+        Short = [<<1,2,3,4,5,6,7,8>> | tl(Masters)],
+        ?assertMatch({error, {bad_input, _}},
+                     itb3:init_keys(<<"singlemsg-triple-mac-v1">>, Short))
+    end}.
+
 version_test() ->
     {ok, Version} = itb3:version(),
     ?assert(byte_size(Version) > 0).

@@ -13,7 +13,7 @@ C binding's static archive (`libitb3_c.a`) at compile time** plus
 loading. Every hash-name / MAC-name / cipher-name / profile-name is
 an opaque string passed through to Go for validation; the binding
 carries no ITB construction logic. The public surface is one `itb3`
-module (`init` / `load` / `load_f` / `save` / `save_f` / `rekey` /
+module (`init` / `init_keys` / `load` / `load_f` / `save` / `save_f` / `rekey` /
 `max_workers` / `free`, Single Message encrypt / decrypt, one-shot and
 incremental stream sessions with `stream_write` / `stream_end` / `stream_read`),
 the profile catalogue (`inspect` / `register` / `lookup` /
@@ -96,6 +96,8 @@ Opts = #{mode => 2, chunkSize => 65536, withWrapper => false},
 {ok, Blob} = itb3:save(Sender),
 {ok, Receiver} = itb3:load(Blob).
 ```
+
+`itb3:init_keys` constructs a `Pipeline` deterministically from eight caller-supplied master keys (one per seed slot `0..7`) via per-slot KDF, so two peers holding the same eight master keys derive identical `Pipeline` instances without exchanging a session blob. The eight master keys must come from independent entropy or key-agreement sources — never derive all eight keys from a single secret or a single KDF parent key.
 
 `itb3:rekey/3` rotates the parallax + wrapper masters mid-session
 (the eight ITB seeds and MAC key are fixed for the session lifetime
