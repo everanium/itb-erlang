@@ -117,6 +117,19 @@ static ERL_NIF_TERM make_ok(ErlNifEnv *env, ERL_NIF_TERM value)
     return enif_make_tuple2(env, enif_make_atom(env, "ok"), value);
 }
 
+/* Zeroes a buffer through a volatile byte pointer so the compiler
+ * cannot dead-store-eliminate the wipe before release. */
+static void wipe_bytes(void *ptr, size_t len)
+{
+    if (ptr == NULL || len == 0) {
+        return;
+    }
+    volatile uint8_t *vp = (volatile uint8_t *)ptr;
+    while (len--) {
+        *vp++ = 0;
+    }
+}
+
 /* Copies an iolist / binary term into a NUL-terminated C string
  * (enif_alloc'd; release with enif_free). NULL when the term is not
  * an iolist or allocation fails. */
@@ -165,12 +178,16 @@ static int opts_from_list(ErlNifEnv *env, ERL_NIF_TERM list, itb_opts **out)
         char *key = term_to_cstr(env, pair[0]);
         char *val = term_to_cstr(env, pair[1]);
         if (key == NULL || val == NULL) {
+            if (val != NULL) {
+                wipe_bytes(val, strlen(val));
+            }
             enif_free(key);
             enif_free(val);
             itb_opts_free(opts);
             return key == NULL && val == NULL ? 0 : -1;
         }
         itb_status st = itb_opts_set(opts, key, val);
+        wipe_bytes(val, strlen(val));
         enif_free(key);
         enif_free(val);
         if (st != ITB_STATUS_OK) {
@@ -445,6 +462,7 @@ static ERL_NIF_TERM save_nif(ErlNifEnv *env, int argc,
         return make_error(env, st);
     }
     ERL_NIF_TERM bin = make_bin(env, blob, blob_len);
+    wipe_bytes(blob, blob_len);
     itb_bytes_free(blob);
     return make_ok(env, bin);
 }
@@ -520,6 +538,7 @@ static ERL_NIF_TERM rekey_nif(ErlNifEnv *env, int argc,
         return make_error(env, st);
     }
     ERL_NIF_TERM bin = make_bin(env, blob, blob_len);
+    wipe_bytes(blob, blob_len);
     itb_bytes_free(blob);
     return make_ok(env, bin);
 }
