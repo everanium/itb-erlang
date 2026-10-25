@@ -169,6 +169,8 @@ flag_table() ->
       "concurrent workers (1..10); on runtimes without parallelism values above 1 are clamped to 1"},
      {"hash", "string", string,
       "inner ITB hash primitive name"},
+     {"interlock", "string", string,
+      "Interlocked Barrier chunk width: 48 | 168; empty = profile default (48; 168 requires 512-bit hash)"},
      {"iterations", "int", int64,
       "fixed per-worker iteration count; 0 = duration-based"},
      {"json-output", "", bool,
@@ -203,7 +205,7 @@ flag_table() ->
 defaults() ->
     #{"barrier-fill" => 0, "blob-cycle-every" => 0, "blob-mode" => 1, "chunk-size" => "0",
       "drbg" => "", "duration" => "5m", "gogc" => 0, "gomaxprocs" => 0, "goroutines" => 3,
-      "hash" => "areion512", "iterations" => 0, "json-output" => false,
+      "hash" => "areion512", "interlock" => "", "iterations" => 0, "json-output" => false,
       "key-bits" => 0, "mac" => "hmac-blake3", "memlimit" => "auto",
       "memprofile" => "", "nonce-bits" => 0, "parallax" => "on",
       "payload-mode" => "fixed", "payload-size" => "16MB", "profile" => "",
@@ -500,9 +502,18 @@ resolve_barrier_fill(V, Cfg) ->
         B when B =:= 0; B =:= 1; B =:= 2; B =:= 4; B =:= 8; B =:= 16; B =:= 32 ->
             %% The DRBG name is validated by Init: the C ABI enumerates
             %% no DRBG names.
-            resolve_chunk_size(V, Cfg#cfg{barrier_fill = B, drbg = maps:get("drbg", V)});
+            resolve_interlock(V, Cfg#cfg{barrier_fill = B, drbg = maps:get("drbg", V)});
         B ->
             err("--barrier-fill must be 1 | 2 | 4 | 8 | 16 | 32 (or 0 = profile default), got ~B", [B]),
+            error
+    end.
+
+resolve_interlock(V, Cfg) ->
+    case maps:get("interlock", V) of
+        IL when IL =:= ""; IL =:= "48"; IL =:= "168" ->
+            resolve_chunk_size(V, Cfg#cfg{interlock = IL});
+        IL ->
+            err("--interlock must be 48 | 168 (or empty = profile default), got \"~s\"", [IL]),
             error
     end.
 
@@ -620,6 +631,7 @@ build_pipeline(Cfg, Profile) ->
             {nonceBits, integer_to_list(Cfg#cfg.nonce_bits)},
             {barrierFill, integer_to_list(Cfg#cfg.barrier_fill)},
             {drbg, Cfg#cfg.drbg},
+            {interlock, Cfg#cfg.interlock},
             {chunkSize, integer_to_list(Cfg#cfg.chunk_size)}],
     Extra = case Cfg#cfg.profile of
                 "" -> {ok, []};
@@ -674,7 +686,9 @@ log_pipeline_initialised(Profile, Blob) ->
             ContainerMode = [" container-mode=2" || record_int(Record, <<"container_mode">>) =:= 2],
             Drbg = [[" drbg=", record_str(Record, <<"drbg">>)]
                     || record_str(Record, <<"drbg">>) =/= "-"],
-            log("~ts", [[Line, ContainerMode, Drbg]])
+            Interlock = [[" interlock=", record_str(Record, <<"interlock">>)]
+                         || record_str(Record, <<"interlock">>) =/= "-"],
+            log("~ts", [[Line, ContainerMode, Drbg, Interlock]])
     end.
 
 record_int(Record, Key) ->
@@ -794,7 +808,7 @@ start_lines(Cfg) ->
          on_off(Cfg#cfg.parallax), on_off(Cfg#cfg.wrapper)]),
     log("overrides: profile=\"~s\" key-bits=~B nonce-bits=~B chunk-size=~s "
         "barrier-fill=~B gomaxprocs=~B rekey-every=~B blob-cycle-every=~B "
-        "payload-mode=~s seed=~B json-output=~s~s~s",
+        "payload-mode=~s seed=~B json-output=~s~s~s~s",
         [Cfg#cfg.profile, Cfg#cfg.key_bits, Cfg#cfg.nonce_bits,
          loop_size:human_bytes(Cfg#cfg.chunk_size), Cfg#cfg.barrier_fill,
          Cfg#cfg.gomaxprocs, Cfg#cfg.rekey_every, Cfg#cfg.blob_cycle_every,
@@ -807,6 +821,10 @@ start_lines(Cfg) ->
          case Cfg#cfg.drbg of
              "" -> "";
              D -> " drbg=" ++ D
+         end,
+         case Cfg#cfg.interlock of
+             "" -> "";
+             IL -> " interlock=" ++ IL
          end]),
     log("policy: microbatch-tiers=~s hashpool-starters=~s",
         [policy_label("ITB_MICROBATCH_TIERS"), policy_label("ITB_HASHPOOL_STARTERS")]).

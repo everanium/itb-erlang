@@ -217,3 +217,30 @@ drbg_register_copy_keeps_key_test() ->
     ok = itb3:register(<<"erlang-binding-test-drbg-copy">>, Copy),
     {ok, Looked} = itb3:lookup(<<"erlang-binding-test-drbg-copy">>),
     ?assertEqual(<<"csprng">>, maps:get(<<"drbg">>, Looked)).
+
+interlock_168_round_trip_test() ->
+    {ok, Sender} = itb3:init(<<"singlemsg-triple-mac-v1">>,
+                             #{interlock => <<"168">>}),
+    {ok, Blob} = itb3:save(Sender),
+    {ok, Receiver} = itb3:load(Blob),
+    Plain = <<"interlock 168 round-trip payload">>,
+    {ok, Wire} = itb3:encrypt_message(Sender, Plain),
+    ?assertEqual({ok, Plain}, itb3:decrypt_message(Receiver, Wire)),
+    {ok, Record} = itb3:inspect(Blob),
+    ?assertEqual(<<"168">>, maps:get(<<"interlock">>, Record)),
+    ok = itb3:free(Receiver),
+    ok = itb3:free(Sender),
+
+    {ok, DefPipe} = itb3:init(<<"singlemsg-triple-mac-v1">>,
+                              #{interlock => <<"48">>}),
+    {ok, DefBlob} = itb3:save(DefPipe),
+    ok = itb3:free(DefPipe),
+    {ok, DefRecord} = itb3:inspect(DefBlob),
+    ?assertNot(maps:is_key(<<"interlock">>, DefRecord)),
+
+    ?assertMatch({error, {bad_input, _}},
+                 itb3:init(<<"singlemsg-triple-mac-v1">>,
+                           #{innerHash => <<"blake3">>, interlock => <<"168">>})),
+    ?assertMatch({error, {bad_input, _}},
+                 itb3:init(<<"singlemsg-triple-mac-v1">>,
+                           #{interlock => <<"96">>})).

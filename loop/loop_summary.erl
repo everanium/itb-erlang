@@ -211,6 +211,7 @@ json(Cfg, F) ->
          ",\"blob_mode\":", int(Cfg#cfg.blob_mode),
          ",\"drbg\":", jstr(Cfg#cfg.drbg),
          ",\"drbg_auto_tier\":", jstr(drbg_auto_tier()),
+         ",\"interlock\":", jstr(Cfg#cfg.interlock),
          ",\"chunk_size_bytes\":", int(Cfg#cfg.chunk_size),
          ",\"barrier_fill\":", int(Cfg#cfg.barrier_fill),
          ",\"parallax\":", jstr(loop_main:on_off(Cfg#cfg.parallax)),

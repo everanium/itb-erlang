@@ -87,11 +87,12 @@ ok = itb3:free(Sender).
 
 Opts override the profile default at `itb3:init` (chunk size, outer
 cipher, parallax on/off, wrapper on/off, MAC name, palette, worker
-cap) as a map or proplist. The resolved shape is written into the
-blob, so the receiver loads it with no opts of its own:
+cap, interlock width `"48"` | `"168"`) as a map or proplist. The
+resolved shape is written into the blob, so the receiver loads it with
+no opts of its own:
 
 ```erlang
-Opts = #{mode => 2, chunkSize => 65536, withWrapper => false},
+Opts = #{mode => 2, interlock => <<"168">>, chunkSize => 65536, withWrapper => false},
 {ok, Sender} = itb3:init(<<"singlemsg-triple-mac-v1">>, Opts),
 {ok, Blob} = itb3:save(Sender),
 {ok, Receiver} = itb3:load(Blob).

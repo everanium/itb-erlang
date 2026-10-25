@@ -51,6 +51,7 @@
     chunk_size = 0,         %% 0 = profile default
     barrier_fill = 0,       %% 0 = profile default
     drbg = "",              %% DRBG fill primitive; "" = profile default (auto tier)
+    interlock = "",         %% Interlocked Barrier chunk width: "" | "48" | "168"
     gomaxprocs = 0,         %% 0 = inherit from the environment
     rekey_every = 0,        %% per-worker iterations between rotations; 0 = never
     blob_cycle_every = 0,   %% per-worker iterations between reopens; 0 = never
