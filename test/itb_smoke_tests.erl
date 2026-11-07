@@ -145,7 +145,12 @@ inspect_opts_mode_test() ->
     {ok, Blob} = itb3:save(Pipe),
     ok = itb3:free(Pipe),
     {ok, Record} = itb3:inspect(Blob),
-    ?assertEqual(2, maps:get(<<"container_mode">>, Record)).
+    ?assertEqual(2, maps:get(<<"container_mode">>, Record)),
+    {ok, P3} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{mode => 3}),
+    {ok, B3} = itb3:save(P3),
+    ok = itb3:free(P3),
+    {ok, Rec3} = itb3:inspect(B3),
+    ?assertEqual(3, maps:get(<<"container_mode">>, Rec3)).
 
 max_workers_test() ->
     {ok, Pipe} = itb3:init(<<"singlemsg-triple-mac-v1">>, #{}),

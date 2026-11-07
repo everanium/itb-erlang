@@ -47,7 +47,7 @@
     profile = "",           %% empty = shape-based profile pair
     key_bits = 0,           %% 0 = profile default
     nonce_bits = 0,         %% 0 = profile default
-    blob_mode = 1,          %% container floor sizing mode: 1 (per-region, default) | 2 (per-container)
+    blob_mode = 1,          %% container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit)
     chunk_size = 0,         %% 0 = profile default
     barrier_fill = 0,       %% 0 = profile default
     drbg = "",              %% DRBG fill primitive; "" = profile default (auto tier)

@@ -154,7 +154,7 @@ flag_table() ->
      {"blob-cycle-every", "int", int64,
       "reopen each pipeline from its session blob every N iterations per worker; 0 = never"},
      {"blob-mode", "int", int,
-      "container floor sizing mode: 1 (per-region, default) | 2 (per-container)"},
+      "container floor sizing mode: 1 (per-region, default) | 2 (per-container) | 3 (gauss-posit)"},
      {"chunk-size", "string", string,
       "streaming chunk-size budget (e.g. 4MB); 0 = profile default; inert for pure message shape"},
      {"drbg", "string", string,
@@ -490,10 +490,10 @@ resolve_nonce_bits(V, Cfg) ->
 
 resolve_blob_mode(V, Cfg) ->
     case maps:get("blob-mode", V) of
-        M when M =:= 1; M =:= 2 ->
+        M when M =:= 1; M =:= 2; M =:= 3 ->
             resolve_barrier_fill(V, Cfg#cfg{blob_mode = M});
         M ->
-            err("--blob-mode must be 1 (per-region) | 2 (per-container), got ~B", [M]),
+            err("--blob-mode must be 1 (per-region) | 2 (per-container) | 3 (gauss-posit), got ~B", [M]),
             error
     end.
 
@@ -683,7 +683,9 @@ log_pipeline_initialised(Profile, Blob) ->
                  record_int(Record, <<"chunk">>), record_str(Record, <<"mac">>),
                  on_off(record_bool(Record, <<"parallax">>)),
                  on_off(record_bool(Record, <<"wrapper">>))]),
-            ContainerMode = [" container-mode=2" || record_int(Record, <<"container_mode">>) =:= 2],
+            ContainerMode = [[" container-mode=", integer_to_list(record_int(Record, <<"container_mode">>))]
+                             || record_int(Record, <<"container_mode">>) =:= 2
+                                orelse record_int(Record, <<"container_mode">>) =:= 3],
             Drbg = [[" drbg=", record_str(Record, <<"drbg">>)]
                     || record_str(Record, <<"drbg">>) =/= "-"],
             Interlock = [[" interlock=", record_str(Record, <<"interlock">>)]
