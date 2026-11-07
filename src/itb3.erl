@@ -307,7 +307,7 @@ json_out({error, _} = Err) -> Err.
 %% Runtime + diagnostics
 %% ------------------------------------------------------------------
 
-%% The libitb3 library version string (e.g. <<"0.8.5">>).
+%% The libitb3 library version string (e.g. <<"0.9.0">>).
 -spec version() -> {ok, binary()} | {error, reason()}.
 version() ->
     itb3_nif:version_nif().
